@@ -51,6 +51,7 @@ pnpm start
 keyor/
 ├── electron/
 │   ├── main.cjs               # Main process: window lifecycle, IPC handlers, web-contents guard
+│   ├── downloads.cjs          # Download manager: active downloads, persistence, and file actions
 │   ├── themes.cjs             # Theme manager: ~/.keyor/theme.json initialization & watcher
 │   ├── preload.cjs            # ContextBridge: safe desktop API exposure
 │   └── webview-preload.cjs    # Guest script injected into <webview>: keyboard bridge & hints
@@ -58,17 +59,19 @@ keyor/
 │   ├── components/
 │   │   ├── BrowserHeader.vue       # Frameless titlebar & numbered tab bar (:1, :2, etc.)
 │   │   ├── BrowserWebview.vue      # Active webviews, hint runner, and navigation controller
-│   │   ├── BrowserStatusline.vue   # Powerline statusline (mode, zoom, scroll %, audio)
+│   │   ├── BrowserStatusline.vue   # Powerline statusline (mode, zoom, scroll %, audio, downloads)
 │   │   ├── CommandBar.vue          # Vim command line (:) with live autocomplete
 │   │   ├── OmnibarModal.vue        # URL & search bar prompt (o, O, t)
 │   │   ├── BufferSwitcher.vue      # Tab/buffer switcher modal (b)
 │   │   ├── BookmarksModal.vue      # Bookmarks manager modal (B)
+│   │   ├── DownloadsModal.vue      # Downloads manager modal (D / :dl)
 │   │   ├── FindInPage.vue          # In-page text search overlay (/)
 │   │   ├── HelpModal.vue           # Searchable keybindings cheatsheet (?)
 │   │   └── NewTabPage.vue          # Internal start dashboard (keyor://start)
 │   ├── composables/
 │   │   ├── useTabs.js              # Tab state machine & closed tab history stack (u)
 │   │   ├── useTheme.js             # Vim theme engine, CSS variable injector & watcher listener
+│   │   ├── useDownloads.js         # Reactive downloads state, real-time events & formatters
 │   │   ├── useVimKeybindings.js    # Mode state, pending key sequences, toast alerts
 │   │   ├── useBookmarks.js         # Bookmarks persistence
 │   │   └── useHistory.js           # Navigation history persistence
@@ -98,13 +101,14 @@ All modal states are coordinated by `useVimKeybindings.js` and dispatched throug
 | `FIND` | `/` | `Esc` / `Enter` | Native Chromium in-page search (`n` next, `N` prev) |
 | `BUFFER` | `b` | `Esc` / `Enter` | Modal buffer / tab switcher |
 | `BOOKMARKS`| `B` | `Esc` / click | Bookmarks manager modal |
+| `DOWNLOADS`| `D` or `:dl` | `Esc` / click | Downloads manager modal (progress, open, reveal in folder) |
 | `HELP` | `?` | `Esc` / click | Interactive Vim cheatsheet |
 
 ### Essential Navigation Keybindings
 - **Scroll:** `j` (down), `k` (up), `d` (half-down), `u` (half-up), `gg` (top), `G` (bottom).
 - **Tabs:** `t` (new tab), `x` / `d` (close tab), `J` / `K` (next/prev tab), `u` / `U` (restore closed tab), `1`..`9` / `:1`..`:9` (direct jump to tab index).
 - **Hints:** `f` (open in active tab), `F` (open in new tab), `gi` (focus first input).
-- **Clipboard:** `yy` (yank current URL), `p` (open clipboard in tab), `P` (open clipboard in new tab).
+- **Clipboard & Downloads:** `yy` (yank current URL), `p` (open clipboard in tab), `P` (open clipboard in new tab), `D` (open Downloads manager).
 - **History & Zoom:** `H` / `L` (back/forward), `r` / `R` (reload/hard-reload), `zi` / `zo` / `zz` (zoom in/out/reset).
 
 ---

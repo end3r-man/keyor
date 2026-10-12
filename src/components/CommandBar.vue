@@ -47,6 +47,15 @@ const commandText = ref('');
 const selectedSuggestionIndex = ref(0);
 const { availableThemesList, activeThemeName } = useTheme();
 
+onMounted(() => {
+  nextTick(() => {
+    cmdInput.value?.focus();
+    setTimeout(() => {
+      cmdInput.value?.focus();
+    }, 40);
+  });
+});
+
 const AVAILABLE_COMMANDS = [
   { name: 'open', args: '<url or query>', desc: 'Open URL or search in current tab' },
   { name: 'tabnew', args: '[url]', desc: 'Open a new tab with optional URL' },
@@ -68,6 +77,8 @@ const AVAILABLE_COMMANDS = [
   { name: 'yank', args: '', desc: 'Copy current page URL to clipboard' },
   { name: 'bookmark', args: '[title]', desc: 'Bookmark current page' },
   { name: 'bookmarks', args: '', desc: 'Open bookmarks manager' },
+  { name: 'downloads', args: '', desc: 'Open downloads manager' },
+  { name: 'dl', args: '', desc: 'Shorthand for :downloads' },
   { name: 'history', args: '', desc: 'View browsing history' },
   { name: 'zoom', args: '<percent>', desc: 'Set zoom level (e.g. 100, 120)' },
   { name: 'fullscreen', args: '', desc: 'Toggle window fullscreen' },

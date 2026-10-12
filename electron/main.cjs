@@ -8,6 +8,15 @@ const {
   saveThemeConfig,
   setupThemeWatcher
 } = require('./themes.cjs');
+const {
+  setupDownloads,
+  getDownloads,
+  cancelDownload,
+  openDownloadFile,
+  showDownloadInFolder,
+  removeDownload,
+  clearDownloads
+} = require('./downloads.cjs');
 
 // Path to user storage directory
 const userDataPath = app.getPath('userData');
@@ -201,9 +210,42 @@ ipcMain.handle('open-theme-file', async () => {
   }
 });
 
+// Download Manager IPC Handlers
+ipcMain.handle('get-downloads', () => {
+  return getDownloads();
+});
+
+ipcMain.handle('cancel-download', (event, id) => {
+  return cancelDownload(id);
+});
+
+ipcMain.handle('open-download-file', async (event, filePath) => {
+  return await openDownloadFile(filePath);
+});
+
+ipcMain.handle('show-download-in-folder', (event, filePath) => {
+  return showDownloadInFolder(filePath);
+});
+
+ipcMain.handle('remove-download', (event, id) => {
+  return removeDownload(id);
+});
+
+ipcMain.handle('clear-downloads', () => {
+  return clearDownloads();
+});
+
 app.whenReady().then(() => {
   ensureThemeConfig();
   createWindow();
+
+  // Initialize Download Manager for both default session and webview partition
+  const webviewSession = session.fromPartition('persist:keyor');
+  setupDownloads([session.defaultSession, webviewSession], (eventName, data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(eventName, data);
+    }
+  });
 
   // Watch ~/.keyor/theme.json for external modifications (e.g. edited in Vim/Neovim)
   setupThemeWatcher((updatedConfig) => {
@@ -226,6 +268,15 @@ app.whenReady().then(() => {
         // -3 is ERR_ABORTED, standard when navigation is superseded or redirected
         if (errorCode !== -3) {
           console.warn(`Webview load failed: [${errorCode}] ${validatedURL}`);
+        }
+      });
+
+      // Handle before-input-event at native Chromium level
+      contents.on('before-input-event', (event, input) => {
+        if (input.type === 'keyDown' && (input.key === 'Escape' || (input.control && input.key === '['))) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('webview-escape-pressed');
+          }
         }
       });
     }

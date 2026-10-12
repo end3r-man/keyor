@@ -45,6 +45,7 @@
       :toastMessage="toastMessage"
       @open-omnibar="openOmnibarCurrent"
       @open-help="openHelpModal"
+      @open-downloads="openDownloadsModal"
     />
 
     <!-- Omnibar Modal ('o', 'O', 't') -->
@@ -97,6 +98,12 @@
       @remove-bookmark="removeBookmark"
       @close="closeBookmarksModal"
     />
+
+    <!-- Downloads Manager ('D' / :dl) -->
+    <DownloadsModal
+      v-if="currentMode === 'DOWNLOADS'"
+      @close="closeDownloadsModal"
+    />
   </div>
 </template>
 
@@ -111,12 +118,14 @@ import FindInPage from "./components/FindInPage.vue";
 import HelpModal from "./components/HelpModal.vue";
 import BufferSwitcher from "./components/BufferSwitcher.vue";
 import BookmarksModal from "./components/BookmarksModal.vue";
+import DownloadsModal from "./components/DownloadsModal.vue";
 
 import { useTabs } from "./composables/useTabs";
 import { useBookmarks } from "./composables/useBookmarks";
 import { useHistory } from "./composables/useHistory";
 import { useVimKeybindings } from "./composables/useVimKeybindings";
 import { useTheme } from "./composables/useTheme";
+import { useDownloads } from "./composables/useDownloads";
 
 const appRoot = ref(null);
 const webviewComponent = ref(null);
@@ -147,10 +156,19 @@ const {
   isHintNewTab,
   toastMessage,
   showToast,
-  setMode,
+  setMode: rawSetMode,
   appendKeyBuffer,
   clearKeyBuffer,
 } = useVimKeybindings();
+
+const setMode = (mode) => {
+  rawSetMode(mode);
+  if (mode !== "NORMAL" && mode !== "INSERT") {
+    webviewComponent.value?.blurActiveWebview();
+    window.focus();
+  }
+  webviewComponent.value?.sendModeToWebview(mode);
+};
 
 const {
   activeThemeName,
@@ -162,6 +180,8 @@ const {
   switchTheme,
   openConfigFile
 } = useTheme();
+
+const { initDownloads, registerToastCallback } = useDownloads();
 
 // Modal States
 const omnibarInitialUrl = ref("");
@@ -195,9 +215,12 @@ const handleAppClick = () => {
 };
 
 let unbindOpenNewTab = null;
+let unbindWebviewEscape = null;
 
 onMounted(() => {
   initTheme();
+  initDownloads();
+  registerToastCallback(showToast);
   window.addEventListener("keydown", handleGlobalKeydown, true);
   if (window.electronAPI?.onOpenNewTab) {
     unbindOpenNewTab = window.electronAPI.onOpenNewTab((url) => {
@@ -207,12 +230,18 @@ onMounted(() => {
       }
     });
   }
+  if (window.electronAPI?.onWebviewEscape) {
+    unbindWebviewEscape = window.electronAPI.onWebviewEscape(() => {
+      handleVimKey("Escape");
+    });
+  }
   ensureFocus();
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleGlobalKeydown, true);
   if (unbindOpenNewTab) unbindOpenNewTab();
+  if (unbindWebviewEscape) unbindWebviewEscape();
 });
 
 const onTabUpdate = ({ id, patch }) => {
@@ -450,6 +479,11 @@ const executeVimCommand = async (rawCommand) => {
       setMode("BOOKMARKS");
       break;
 
+    case "downloads":
+    case "dl":
+      setMode("DOWNLOADS");
+      break;
+
     case "history":
       createTab("keyor://start", true);
       break;
@@ -583,6 +617,16 @@ const closeBookmarksModal = () => {
   ensureFocus();
 };
 
+// Downloads Modal
+const openDownloadsModal = () => {
+  setMode("DOWNLOADS");
+};
+
+const closeDownloadsModal = () => {
+  setMode("NORMAL");
+  ensureFocus();
+};
+
 // Clipboard URL Yank
 const handleYankUrl = async () => {
   const url = activeTab.value?.url || "";
@@ -699,9 +743,9 @@ const onWebviewModeChange = (mode) => {
 
 // Global Keydown Handler (Attached to window in capture phase)
 const handleGlobalKeydown = (e) => {
-  // 1. If currently in an open modal (COMMAND, OMNIBAR, FIND, HELP, BUFFER, BOOKMARKS)
+  // 1. If currently in an open modal (COMMAND, OMNIBAR, FIND, HELP, BUFFER, BOOKMARKS, DOWNLOADS)
   if (
-    ["OMNIBAR", "COMMAND", "FIND", "HELP", "BUFFER", "BOOKMARKS"].includes(
+    ["OMNIBAR", "COMMAND", "FIND", "HELP", "BUFFER", "BOOKMARKS", "DOWNLOADS"].includes(
       currentMode.value,
     )
   ) {
@@ -734,6 +778,21 @@ const handleGlobalKeydown = (e) => {
       showToast("-- NORMAL --", 1000);
       return;
     }
+    // Allow Ctrl+t / Alt+t even while editing
+    if ((e.ctrlKey || e.altKey) && e.key.toLowerCase() === "t") {
+      e.preventDefault();
+      e.stopPropagation();
+      openOmnibarNewTab();
+      return;
+    }
+    return;
+  }
+
+  // Universal new tab shortcut: Ctrl+t / Alt+t
+  if ((e.ctrlKey || e.altKey) && e.key.toLowerCase() === "t") {
+    e.preventDefault();
+    e.stopPropagation();
+    openOmnibarNewTab();
     return;
   }
 
@@ -761,6 +820,7 @@ const handleGlobalKeydown = (e) => {
       "?",
       "b",
       "B",
+      "D",
     ];
     if (vimNavKeys.includes(e.key)) {
       e.preventDefault();
@@ -780,12 +840,33 @@ const handleVimKey = async (key, event = {}) => {
     }
     setMode("NORMAL");
     clearKeyBuffer();
+    webviewComponent.value?.blurActiveWebview();
     ensureFocus();
     showToast("-- NORMAL --", 1000);
     return;
   }
 
-  // If in INSERT mode: ignore other keys unless Escape was pressed
+  // Universal shortcut: Ctrl+t or Alt+t (New Tab Omnibar)
+  if ((event.ctrlKey || event.altKey) && (key === "t" || key === "T")) {
+    if (event.preventDefault) event.preventDefault();
+    openOmnibarNewTab();
+    return;
+  }
+
+  // Universal shortcut: Alt+1..9 or Ctrl+1..9 (Direct tab jumping)
+  if ((event.altKey || event.ctrlKey) && /^[1-9]$/.test(key)) {
+    if (event.preventDefault) event.preventDefault();
+    const tabNum = parseInt(key, 10);
+    const ok = jumpToTab(tabNum);
+    if (ok) {
+      showToast(`Jumped to tab ${tabNum}`);
+    } else {
+      showToast(`Tab ${tabNum} does not exist (${tabs.value.length} open)`);
+    }
+    return;
+  }
+
+  // If in INSERT mode: ignore other keys unless Escape was pressed or universal shortcuts
   if (currentMode.value === "INSERT") {
     return;
   }
@@ -795,19 +876,6 @@ const handleVimKey = async (key, event = {}) => {
     if (/^[a-zA-Z]$/.test(key)) {
       if (event.preventDefault) event.preventDefault();
       await processHintInput(key);
-    }
-    return;
-  }
-
-  // Alt+1..9 or Ctrl+1..9: Direct tab jumping
-  if ((event.altKey || event.ctrlKey) && /^[1-9]$/.test(key)) {
-    if (event.preventDefault) event.preventDefault();
-    const tabNum = parseInt(key, 10);
-    const ok = jumpToTab(tabNum);
-    if (ok) {
-      showToast(`Jumped to tab ${tabNum}`);
-    } else {
-      showToast(`Tab ${tabNum} does not exist (${tabs.value.length} open)`);
     }
     return;
   }
@@ -987,13 +1055,17 @@ const handleVimKey = async (key, event = {}) => {
         setMode("HELP");
         break;
 
-      // Buffers & Bookmarks
+      // Buffers, Bookmarks & Downloads
       case "b":
         setMode("BUFFER");
         break;
 
       case "B":
         setMode("BOOKMARKS");
+        break;
+
+      case "D":
+        setMode("DOWNLOADS");
         break;
 
       case "p":

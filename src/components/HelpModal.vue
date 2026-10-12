@@ -97,7 +97,8 @@ const SECTIONS = [
       { keys: ['yy'], desc: 'Yank (copy) current page URL' },
       { keys: ['p'], desc: 'Paste clipboard URL in current tab' },
       { keys: ['P'], desc: 'Paste clipboard URL in new tab' },
-      { keys: ['B'], desc: 'Open Bookmarks manager' }
+      { keys: ['B'], desc: 'Open Bookmarks manager' },
+      { keys: ['D'], desc: 'Open Downloads manager (:dl)' }
     ]
   },
   {

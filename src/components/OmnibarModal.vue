@@ -87,6 +87,9 @@ onMounted(() => {
   nextTick(() => {
     inputEl.value?.focus();
     inputEl.value?.select();
+    setTimeout(() => {
+      inputEl.value?.focus();
+    }, 40);
   });
 });
 

@@ -30,5 +30,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (event, url) => callback(url);
     ipcRenderer.on('open-new-tab', handler);
     return () => ipcRenderer.removeListener('open-new-tab', handler);
+  },
+  // Download Manager
+  getDownloads: () => ipcRenderer.invoke('get-downloads'),
+  cancelDownload: (id) => ipcRenderer.invoke('cancel-download', id),
+  openDownloadFile: (filePath) => ipcRenderer.invoke('open-download-file', filePath),
+  showDownloadInFolder: (filePath) => ipcRenderer.invoke('show-download-in-folder', filePath),
+  removeDownload: (id) => ipcRenderer.invoke('remove-download', id),
+  clearDownloads: () => ipcRenderer.invoke('clear-downloads'),
+  onDownloadStarted: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('download-started', handler);
+    return () => ipcRenderer.removeListener('download-started', handler);
+  },
+  onDownloadProgress: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('download-progress', handler);
+    return () => ipcRenderer.removeListener('download-progress', handler);
+  },
+  onDownloadCompleted: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('download-completed', handler);
+    return () => ipcRenderer.removeListener('download-completed', handler);
+  },
+  onDownloadFailed: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('download-failed', handler);
+    return () => ipcRenderer.removeListener('download-failed', handler);
+  },
+  onWebviewEscape: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('webview-escape-pressed', handler);
+    return () => ipcRenderer.removeListener('webview-escape-pressed', handler);
   }
 });

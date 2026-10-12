@@ -96,6 +96,7 @@
             <div class="cheat-row"><kbd>yy</kbd><span>Yank (copy) current URL</span></div>
             <div class="cheat-row"><kbd>/</kbd><span>Find in page</span></div>
             <div class="cheat-row"><kbd>:</kbd><span>Vim command prompt</span></div>
+            <div class="cheat-row"><kbd>D</kbd><span>Downloads manager</span></div>
           </div>
         </div>
       </div>

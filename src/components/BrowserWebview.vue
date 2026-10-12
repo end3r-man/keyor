@@ -147,6 +147,7 @@ const setupWebviewEvents = (tabId, wv) => {
   });
 
   wv.addEventListener('did-navigate', (e) => {
+    emit('mode-change', 'NORMAL');
     emit('update-tab', {
       id: tabId,
       patch: {
@@ -160,6 +161,7 @@ const setupWebviewEvents = (tabId, wv) => {
 
   wv.addEventListener('did-navigate-in-page', (e) => {
     if (e.isMainFrame) {
+      emit('mode-change', 'NORMAL');
       emit('update-tab', {
         id: tabId,
         patch: {
@@ -397,6 +399,25 @@ const stopFindInPage = (action = 'clearSelection') => {
   }
 };
 
+const blurActiveWebview = () => {
+  const wv = getActiveWebview();
+  if (wv) {
+    if (typeof wv.blur === 'function') wv.blur();
+    try {
+      wv.send('host-message', { type: 'BLUR_ACTIVE' });
+    } catch (e) {}
+  }
+};
+
+const sendModeToWebview = (mode) => {
+  const wv = getActiveWebview();
+  if (wv) {
+    try {
+      wv.send('host-message', { type: 'SET_MODE', mode });
+    } catch (e) {}
+  }
+};
+
 defineExpose({
   startHintMode,
   filterHints,
@@ -418,6 +439,8 @@ defineExpose({
   findInPage,
   stopFindInPage,
   getActiveWebview,
+  blurActiveWebview,
+  sendModeToWebview,
   navigateTo: navigateActiveTab
 });
 </script>

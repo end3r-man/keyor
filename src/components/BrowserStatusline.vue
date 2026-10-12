@@ -68,6 +68,26 @@
         <span class="stat-value">{{ scrollText }}</span>
       </div>
 
+      <!-- Downloads status indicator -->
+      <div
+        v-if="activeDownloadsCount > 0"
+        class="status-stat dl-indicator-active"
+        @click="$emit('open-downloads')"
+        :title="`Active downloads: ${activeDownloadsCount} (${overallProgress}%) • Click or press D to open`"
+      >
+        <span class="dl-anim-icon">⬇</span>
+        <span class="stat-value">{{ overallProgress }}%</span>
+        <span v-if="activeSpeed > 0" class="dl-speed-badge">{{ formatSpeed(activeSpeed) }}</span>
+      </div>
+      <button
+        v-else
+        class="help-btn dl-btn"
+        @click="$emit('open-downloads')"
+        title="Downloads Manager (D / :dl)"
+      >
+        ⬇
+      </button>
+
       <!-- Vim Help hint -->
       <button class="help-btn" @click="$emit('open-help')" title="Vim Cheatsheet (?)">
         ?
@@ -78,6 +98,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { useDownloads } from '../composables/useDownloads';
 
 const props = defineProps({
   mode: {
@@ -110,7 +131,14 @@ const props = defineProps({
   }
 });
 
-defineEmits(['open-omnibar', 'open-help']);
+defineEmits(['open-omnibar', 'open-help', 'open-downloads']);
+
+const {
+  activeDownloadsCount,
+  overallProgress,
+  activeSpeed,
+  formatSpeed
+} = useDownloads();
 
 const modeText = computed(() => {
   switch (props.mode) {
@@ -372,5 +400,44 @@ const scrollText = computed(() => {
 .help-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
+}
+
+.dl-indicator-active {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: var(--accent-blue);
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  transition: all 0.12s ease;
+}
+
+.dl-indicator-active:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.dl-anim-icon {
+  animation: bounce 1.2s infinite ease-in-out;
+  display: inline-block;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.dl-speed-badge {
+  color: var(--accent-cyan);
+  font-size: 8.5px;
+  opacity: 0.9;
+}
+
+.dl-btn {
+  font-size: 8.5px;
 }
 </style>

@@ -17,6 +17,7 @@ Keyor brings modal navigation, home-row hinting, and Vim muscle memory to the mo
 - 🔎 **Native In-Page Find (`/`)**: High-speed native Chromium find-in-page with match counter (`n` for next match, `N` for previous match).
 - 📊 **Powerline-Style Statusline**: Live mode badge (`NORMAL`, `INSERT`, `HINT`, `COMMAND`, `FIND`), SSL indicator, URL display, pending key sequence buffer, zoom indicator, buffer stats, and scroll percentage (`Top`, `42%`, `Bot`).
 - 📋 **URL Yank & Paste (`yy` / `p` / `P`)**: Yank current page URL to system clipboard with `yy`, paste and navigate with `p` / `P`.
+- 📦 **Download Manager (`D` / `:dl`)**: Built-in downloads manager with live progress, download speed, one-click open (`Enter`), reveal in file manager (`f`), cancel (`x`), and statusline indicator.
 - ⚡ **Start Dashboard (`keyor://start`)**: Clean new tab dashboard with live digital clock, speed dial shortcuts, recent history, and built-in keybinding reference.
 - ❓ **Interactive Cheat Sheet (`?`)**: Full searchable cheatsheet modal with categorized keybindings.
 
@@ -52,6 +53,7 @@ Keyor brings modal navigation, home-row hinting, and Vim muscle memory to the mo
 | `:` | NORMAL | Enter Vim command line |
 | `b` | NORMAL | Open buffer / tab switcher dialog |
 | `B` | NORMAL | Open bookmarks manager |
+| `D` | NORMAL | Open downloads manager |
 | `?` | NORMAL | Open Vim keybinding cheat sheet modal |
 
 ---

@@ -1,17 +1,37 @@
 const { ipcRenderer } = require('electron');
 
-// Check if an element is text-editable
+/**
+ * Deeply resolve the active element through any Shadow DOM roots (e.g. YouTube Polymer components)
+ */
+function getDeepActiveElement(doc = document) {
+  let el = doc.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) {
+    el = el.shadowRoot.activeElement;
+  }
+  return el;
+}
+
+/**
+ * Check if a DOM element is a text editable field
+ */
 function isEditableElement(el) {
   if (!el) return false;
-  const tag = el.tagName ? el.tagName.toLowerCase() : '';
+  const tag = (el.tagName || '').toLowerCase();
+
   if (tag === 'input') {
     const type = (el.type || '').toLowerCase();
-    const nonTextTypes = ['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image'];
+    const nonTextTypes = ['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image', 'hidden'];
     return !nonTextTypes.includes(type);
   }
+
   if (tag === 'textarea' || tag === 'select') return true;
-  if (el.isContentEditable) return true;
-  if (el.getAttribute && el.getAttribute('role') === 'textbox') return true;
+  if (el.isContentEditable || el.contentEditable === 'true') return true;
+
+  if (el.getAttribute) {
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role === 'textbox' || role === 'searchbox' || role === 'combobox') return true;
+  }
+
   return false;
 }
 
@@ -19,7 +39,6 @@ function isEditableElement(el) {
 let currentHostMode = 'NORMAL';
 
 window.addEventListener('DOMContentLoaded', () => {
-  // Report title and URL
   ipcRenderer.sendToHost({
     type: 'PAGE_INFO',
     title: document.title,
@@ -43,28 +62,48 @@ window.addEventListener('scroll', () => {
   }, 50);
 }, { passive: true });
 
-// Listen for focus changes
-document.addEventListener('focusin', (e) => {
-  if (isEditableElement(e.target)) {
+// Sync focus states accurately
+function checkActiveFocus() {
+  const active = getDeepActiveElement();
+  if (isEditableElement(active)) {
     ipcRenderer.sendToHost({ type: 'FOCUS_INPUT' });
-  }
-}, true);
-
-document.addEventListener('focusout', (e) => {
-  if (isEditableElement(e.target)) {
+  } else {
     ipcRenderer.sendToHost({ type: 'BLUR_INPUT' });
   }
+}
+
+document.addEventListener('focusin', checkActiveFocus, true);
+document.addEventListener('focusout', () => {
+  setTimeout(checkActiveFocus, 10);
 }, true);
 
-// Listen to keyboard events on the webpage
-window.addEventListener('keydown', (e) => {
-  const isEditing = isEditableElement(document.activeElement);
+// Pointer down handler to quickly detect clicks on non-editable elements (video players, background, buttons)
+document.addEventListener('pointerdown', () => {
+  setTimeout(checkActiveFocus, 20);
+}, true);
 
-  // If in Escape key, always blur active input and return to normal mode
+// Reserved Vim keys in NORMAL mode
+const VIM_NORMAL_KEYS = new Set([
+  'j', 'k', 'd', 'u', 'g', 'G', 'f', 'F', 'o', 'O', 't', 'x', 'r', 'R',
+  'H', 'L', 'y', '/', ':', '?', 'i', 'b', 'B', 'D', 'n', 'N', 'z', 'p', 'P',
+  'J', 'K', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+]);
+
+/**
+ * Intercept keyboard events in the capture phase before webpage scripts receive them
+ */
+function handleKeyDown(e) {
+  const active = getDeepActiveElement();
+  const isEditing = isEditableElement(active);
+
+  // 1. Escape key: always blur any active input element and return to NORMAL mode
   if (e.key === 'Escape' || (e.ctrlKey && e.key === '[')) {
-    if (isEditing && document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
+    if (active && typeof active.blur === 'function') {
+      active.blur();
     }
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
     ipcRenderer.sendToHost({
       type: 'VIM_KEY',
       key: 'Escape',
@@ -75,36 +114,67 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  // If currently typing inside an input field, allow normal behavior unless it's a browser command
-  if (isEditing) {
+  // 2. Allow direct tab jump shortcuts (Alt+1..9 or Ctrl+1..9) even while editing
+  if ((e.altKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    ipcRenderer.sendToHost({
+      type: 'VIM_KEY',
+      key: e.key,
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey,
+      altKey: e.altKey
+    });
     return;
   }
 
-  // Keys reserved for Vim Normal navigation
-  const vimKeys = [
-    'j', 'k', 'd', 'u', 'g', 'G', 'f', 'F', 'o', 'O', 't', 'x', 'r', 'R',
-    'H', 'L', 'y', '/', ':', '?', 'i', 'b', 'B', 'n', 'N', 'z', 'p', 'P'
-  ];
+  // 3. Allow Ctrl+t or Alt+t (open new tab) even while editing
+  if ((e.ctrlKey || e.altKey) && e.key.toLowerCase() === 't') {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    ipcRenderer.sendToHost({
+      type: 'VIM_KEY',
+      key: 't',
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey,
+      altKey: e.altKey
+    });
+    return;
+  }
 
+  // 4. If actively editing an input or host mode is explicitly INSERT,
+  // let keys pass directly to webpage / input field
+  if (isEditing || currentHostMode === 'INSERT') {
+    return;
+  }
+
+  // 5. In NORMAL mode: intercept Vim keys before webpage scripts (e.g. YouTube player shortcuts)
   if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-    if (vimKeys.includes(e.key) || (e.key.length === 1 && !isNaN(e.key))) {
+    if (VIM_NORMAL_KEYS.has(e.key)) {
+      // Completely halt the event from reaching YouTube / webpage listeners
       e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation();
+
       ipcRenderer.sendToHost({
         type: 'VIM_KEY',
         key: e.key,
         shiftKey: e.shiftKey,
-        ctrlKey: e.ctrlKey,
-        altKey: e.altKey
+        ctrlKey: false,
+        altKey: false
       });
       return;
     }
   }
 
-  // Support Ctrl+d, Ctrl+u, etc.
+  // 6. Ctrl+d, Ctrl+u half page scroll, Ctrl+b, Ctrl+f
   if (e.ctrlKey && ['d', 'u', 'b', 'f'].includes(e.key.toLowerCase())) {
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
+
     ipcRenderer.sendToHost({
       type: 'VIM_KEY',
       key: e.key,
@@ -113,7 +183,11 @@ window.addEventListener('keydown', (e) => {
       altKey: false
     });
   }
-}, true);
+}
+
+// Attach to both window and document with capture: true for rock-solid interception
+window.addEventListener('keydown', handleKeyDown, true);
+document.addEventListener('keydown', handleKeyDown, true);
 
 // Listen for messages from host application
 ipcRenderer.on('host-message', (event, message) => {
@@ -121,6 +195,19 @@ ipcRenderer.on('host-message', (event, message) => {
 
   if (message.type === 'SET_MODE') {
     currentHostMode = message.mode;
+    if (message.mode === 'NORMAL') {
+      const active = getDeepActiveElement();
+      if (active && typeof active.blur === 'function') {
+        active.blur();
+      }
+    }
+  }
+
+  if (message.type === 'BLUR_ACTIVE') {
+    const active = getDeepActiveElement();
+    if (active && typeof active.blur === 'function') {
+      active.blur();
+    }
   }
 
   if (message.type === 'FOCUS_FIRST_INPUT') {
