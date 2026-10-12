@@ -25,5 +25,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (event, data) => callback(data);
     ipcRenderer.on('theme-changed', handler);
     return () => ipcRenderer.removeListener('theme-changed', handler);
+  },
+  onOpenNewTab: (callback) => {
+    const handler = (event, url) => callback(url);
+    ipcRenderer.on('open-new-tab', handler);
+    return () => ipcRenderer.removeListener('open-new-tab', handler);
   }
 });

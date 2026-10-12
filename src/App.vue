@@ -194,14 +194,25 @@ const handleAppClick = () => {
   }
 };
 
+let unbindOpenNewTab = null;
+
 onMounted(() => {
   initTheme();
   window.addEventListener("keydown", handleGlobalKeydown, true);
+  if (window.electronAPI?.onOpenNewTab) {
+    unbindOpenNewTab = window.electronAPI.onOpenNewTab((url) => {
+      if (url) {
+        createTab(url, true);
+        showToast(`Opened tab: ${url}`);
+      }
+    });
+  }
   ensureFocus();
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleGlobalKeydown, true);
+  if (unbindOpenNewTab) unbindOpenNewTab();
 });
 
 const onTabUpdate = ({ id, patch }) => {
@@ -255,10 +266,11 @@ const handleOmnibarSubmit = ({ url, inNewTab }) => {
     createTab(url, true);
     showToast(`Opened: ${url}`);
   } else {
+    const wasStartPage = activeTab.value?.url?.startsWith("keyor://start");
     updateTab(activeTabId.value, { url, isLoading: true });
-    const wv = webviewComponent.value?.getActiveWebview();
-    if (wv && typeof wv.loadURL === "function") {
-      wv.loadURL(url);
+    // If not on start page, we tell the existing mounted webview to navigate
+    if (!wasStartPage && webviewComponent.value?.navigateTo) {
+      webviewComponent.value.navigateTo(url);
     }
     showToast(`Navigating: ${url}`);
   }

@@ -140,6 +140,12 @@ const setupWebviewEvents = (tabId, wv) => {
     }
   });
 
+  wv.addEventListener('did-fail-load', (e) => {
+    // Error code -3 is ERR_ABORTED, standard when requests are superseded or redirected
+    if (e.errorCode === -3) return;
+    emit('update-tab', { id: tabId, patch: { isLoading: false } });
+  });
+
   wv.addEventListener('did-navigate', (e) => {
     emit('update-tab', {
       id: tabId,
@@ -209,12 +215,43 @@ const getActiveWebview = () => {
   return webviewRefs[props.activeTabId];
 };
 
-const navigateTab = (tabId, url) => {
-  emit('update-tab', { id: tabId, patch: { url } });
-  const wv = webviewRefs[tabId];
-  if (wv && typeof wv.loadURL === 'function') {
-    wv.loadURL(url);
+const loadWebviewUrl = (wv, targetUrl) => {
+  if (!wv || !targetUrl) return;
+  try {
+    if (typeof wv.getURL === 'function' && wv.getURL() === targetUrl) {
+      return;
+    }
+  } catch (e) {}
+
+  if (typeof wv.loadURL === 'function') {
+    wv.loadURL(targetUrl).catch((err) => {
+      // Ignore ERR_ABORTED (-3) as it happens normally on redirects or rapid input
+      if (err && err.errno !== -3 && err.code !== 'ERR_ABORTED') {
+        console.warn('Navigation error:', err);
+      }
+    });
+  } else {
+    wv.src = targetUrl;
   }
+};
+
+const navigateTab = (tabId, url) => {
+  const currentTab = props.tabs.find(t => t.id === tabId);
+  const wasStartPage = currentTab?.url?.startsWith('keyor://start');
+  emit('update-tab', { id: tabId, patch: { url, isLoading: true } });
+
+  // If it was start page, Vue unmounts NewTabPage and mounts <webview :src="url">,
+  // which automatically initiates the first load without a double loadURL call.
+  if (!wasStartPage) {
+    const wv = webviewRefs[tabId];
+    if (wv) {
+      loadWebviewUrl(wv, url);
+    }
+  }
+};
+
+const navigateActiveTab = (url) => {
+  navigateTab(props.activeTabId, url);
 };
 
 // Hint Mode Methods
@@ -380,7 +417,8 @@ defineExpose({
   goForward,
   findInPage,
   stopFindInPage,
-  getActiveWebview
+  getActiveWebview,
+  navigateTo: navigateActiveTab
 });
 </script>
 

@@ -212,6 +212,25 @@ app.whenReady().then(() => {
     }
   });
 
+  // Handle webview guest contents
+  app.on('web-contents-created', (event, contents) => {
+    if (contents.getType() === 'webview') {
+      contents.setWindowOpenHandler(({ url }) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('open-new-tab', url);
+        }
+        return { action: 'deny' };
+      });
+
+      contents.on('did-fail-load', (e, errorCode, errorDescription, validatedURL) => {
+        // -3 is ERR_ABORTED, standard when navigation is superseded or redirected
+        if (errorCode !== -3) {
+          console.warn(`Webview load failed: [${errorCode}] ${validatedURL}`);
+        }
+      });
+    }
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
