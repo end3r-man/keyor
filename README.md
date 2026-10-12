@@ -2,6 +2,11 @@
 
 > **A Keyboard-Focused, Vim-Inspired Web Browser built with Vue.js & Electron**
 
+> [!WARNING]
+> ### ⚠️ Experimental Project – Not for Daily Use
+> **Keyor is an experimental learning project and is NOT intended for daily browsing.**
+> This project serves as an architectural prototype and learning platform to explore keyboard-first modal navigation, Vim paradigms, and input interception techniques before building a full-fledged, native browser directly from the **Chromium source code**.
+
 Keyor brings modal navigation, home-row hinting, and Vim muscle memory to the modern web. Built with **Vue 3**, **Vite**, and **Electron**, Keyor provides a fast, distraction-free browsing experience without needing a mouse.
 
 ---
