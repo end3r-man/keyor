@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Vim-inspired keyboard-focused web browser built with Vue.js and Electron",
+  "license": "GPL-3.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
