@@ -62,5 +62,49 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = () => callback();
     ipcRenderer.on('webview-escape-pressed', handler);
     return () => ipcRenderer.removeListener('webview-escape-pressed', handler);
+  },
+  // WebContentsView Native Tab Management
+  tabViewCreate: (id, url) => ipcRenderer.invoke('tab-view-create', id, url),
+  tabViewSwitch: (id, url) => ipcRenderer.invoke('tab-view-switch', id, url),
+  tabViewClose: (id) => ipcRenderer.invoke('tab-view-close', id),
+  tabViewNavigate: (id, url) => ipcRenderer.invoke('tab-view-navigate', id, url),
+  tabViewSetMode: (mode) => ipcRenderer.invoke('tab-view-set-mode', mode),
+  tabViewSetBounds: (bounds) => ipcRenderer.invoke('tab-view-set-bounds', bounds),
+  tabViewBlur: () => ipcRenderer.invoke('tab-view-blur'),
+  tabViewFocusFirstInput: () => ipcRenderer.invoke('tab-view-focus-first-input'),
+  tabViewScrollBy: (top, left, smooth) => ipcRenderer.invoke('tab-view-scroll-by', top, left, smooth),
+  tabViewScrollTo: (top, left, smooth) => ipcRenderer.invoke('tab-view-scroll-to', top, left, smooth),
+  tabViewSetZoom: (factor) => ipcRenderer.invoke('tab-view-set-zoom', factor),
+  tabViewGetZoom: () => ipcRenderer.invoke('tab-view-get-zoom'),
+  tabViewReload: (hard) => ipcRenderer.invoke('tab-view-reload', hard),
+  tabViewGoBack: () => ipcRenderer.invoke('tab-view-go-back'),
+  tabViewGoForward: () => ipcRenderer.invoke('tab-view-go-forward'),
+  tabViewFind: (text, options) => ipcRenderer.invoke('tab-view-find', text, options),
+  tabViewStopFind: (action) => ipcRenderer.invoke('tab-view-stop-find', action),
+  tabViewExecuteScript: (script) => ipcRenderer.invoke('tab-view-execute-script', script),
+  onTabUpdate: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('tab-update', handler);
+    return () => ipcRenderer.removeListener('tab-update', handler);
+  },
+  onTabVimKey: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('tab-vim-key', handler);
+    return () => ipcRenderer.removeListener('tab-vim-key', handler);
+  },
+  onTabModeChange: (callback) => {
+    const handler = (event, mode) => callback(mode);
+    ipcRenderer.on('tab-mode-change', handler);
+    return () => ipcRenderer.removeListener('tab-mode-change', handler);
+  },
+  onTabFoundInPage: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('tab-found-in-page', handler);
+    return () => ipcRenderer.removeListener('tab-found-in-page', handler);
+  },
+  onTabHistory: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('tab-history', handler);
+    return () => ipcRenderer.removeListener('tab-history', handler);
   }
 });

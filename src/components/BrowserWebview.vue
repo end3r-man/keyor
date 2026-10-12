@@ -1,52 +1,40 @@
 <template>
-  <div class="browser-webview-container">
+  <div class="browser-webview-container" ref="containerEl">
+    <!-- Internal Start Page -->
     <div
-      v-for="tab in tabs"
-      :key="tab.id"
-      class="tab-viewport"
-      :class="{ 'is-active': tab.id === activeTabId }"
-      v-show="tab.id === activeTabId"
+      v-if="activeTab?.url?.startsWith('keyor://start')"
+      class="tab-viewport is-active"
     >
-      <!-- Internal Start Page -->
       <NewTabPage
-        v-if="tab.url.startsWith('keyor://start')"
         :bookmarks="bookmarks"
         :history="history"
-        @navigate="(url) => navigateTab(tab.id, url)"
+        @navigate="navigateActiveTab"
         @open-omnibar="$emit('open-omnibar')"
         @open-help="$emit('open-help')"
       />
-
-      <!-- Electron Webview (when inside Electron) -->
-      <webview
-        v-else-if="isElectron"
-        :ref="el => setWebviewRef(tab.id, el)"
-        :src="tab.url"
-        :preload="webviewPreloadPath"
-        allowpopups
-        partition="persist:keyor"
-        class="webview-frame"
-      ></webview>
-
-      <!-- Web / Non-Electron Fallback (iframe with info banner) -->
-      <div v-else class="iframe-container">
-        <div class="web-preview-notice">
-          <span class="notice-badge">ELECTRON WEBVIEW</span>
-          <span class="notice-text">In desktop Electron mode, full webviews with sandboxed DOM hinting run natively.</span>
-          <span class="notice-url">{{ tab.url }}</span>
-        </div>
-        <iframe
-          :src="tab.url"
-          class="iframe-view"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        ></iframe>
-      </div>
     </div>
+
+    <!-- Web / Non-Electron Fallback (iframe with info banner when not in Electron) -->
+    <div v-else-if="!isElectron" class="iframe-container">
+      <div class="web-preview-notice">
+        <span class="notice-badge">WEB PREVIEW</span>
+        <span class="notice-text">In desktop Electron mode, native WebContentsView renders directly via Chromium views.</span>
+        <span class="notice-url">{{ activeTab?.url }}</span>
+      </div>
+      <iframe
+        :src="activeTab?.url"
+        class="iframe-view"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      ></iframe>
+    </div>
+
+    <!-- When inside Electron, the native WebContentsView is mounted directly into the window by Electron -->
+    <div v-else class="native-view-anchor" title="WebContentsView active"></div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import NewTabPage from './NewTabPage.vue';
 import {
   generateHintCodes,
@@ -86,184 +74,139 @@ const emit = defineEmits([
   'found-in-page'
 ]);
 
-const webviewRefs = {};
-const webviewPreloadPath = ref('');
+const containerEl = ref(null);
 const isElectron = ref(false);
+let resizeObserver = null;
 
-const setWebviewRef = (id, el) => {
-  if (el) {
-    webviewRefs[id] = el;
-    setupWebviewEvents(id, el);
-  } else {
-    delete webviewRefs[id];
+const activeTab = computed(() => {
+  return props.tabs.find((t) => t.id === props.activeTabId) || props.tabs[0];
+});
+
+// Sync bounds to Electron
+const syncViewportBounds = () => {
+  if (!isElectron.value || !containerEl.value || !window.electronAPI?.tabViewSetBounds) return;
+  const rect = containerEl.value.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    window.electronAPI.tabViewSetBounds({
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    });
   }
 };
 
-onMounted(async () => {
+// Lifecycle listeners
+let unbindTabUpdate = null;
+let unbindTabVimKey = null;
+let unbindTabModeChange = null;
+let unbindTabFoundInPage = null;
+let unbindTabHistory = null;
+
+onMounted(() => {
   if (window.electronAPI) {
     isElectron.value = true;
-    try {
-      webviewPreloadPath.value = await window.electronAPI.getWebviewPreloadPath();
-    } catch (e) {
-      console.warn('Failed to get preload path:', e);
+
+    // Listen to native WebContentsView events forwarded from Electron
+    if (window.electronAPI.onTabUpdate) {
+      unbindTabUpdate = window.electronAPI.onTabUpdate((data) => {
+        emit('update-tab', data);
+      });
     }
+
+    if (window.electronAPI.onTabVimKey) {
+      unbindTabVimKey = window.electronAPI.onTabVimKey((data) => {
+        emit('vim-key', data);
+      });
+    }
+
+    if (window.electronAPI.onTabModeChange) {
+      unbindTabModeChange = window.electronAPI.onTabModeChange((mode) => {
+        emit('mode-change', mode);
+      });
+    }
+
+    if (window.electronAPI.onTabFoundInPage) {
+      unbindTabFoundInPage = window.electronAPI.onTabFoundInPage((data) => {
+        emit('found-in-page', {
+          activeMatchOrdinal: data.activeMatchOrdinal,
+          matches: data.matches,
+          finalUpdate: data.finalUpdate
+        });
+      });
+    }
+
+    if (window.electronAPI.onTabHistory) {
+      unbindTabHistory = window.electronAPI.onTabHistory((data) => {
+        emit('add-history', data);
+      });
+    }
+
+    // Set up ResizeObserver to automatically notify Electron of viewport bounds
+    if (containerEl.value && window.ResizeObserver) {
+      resizeObserver = new ResizeObserver(() => {
+        syncViewportBounds();
+      });
+      resizeObserver.observe(containerEl.value);
+    }
+
+    nextTick(() => {
+      syncViewportBounds();
+      // Initialize active tab view
+      if (activeTab.value) {
+        window.electronAPI.tabViewSwitch(activeTab.value.id, activeTab.value.url);
+      }
+    });
   }
 });
 
-const setupWebviewEvents = (tabId, wv) => {
-  if (!wv || wv._hasKeyorEvents) return;
-  wv._hasKeyorEvents = true;
+onUnmounted(() => {
+  if (resizeObserver) resizeObserver.disconnect();
+  if (unbindTabUpdate) unbindTabUpdate();
+  if (unbindTabVimKey) unbindTabVimKey();
+  if (unbindTabModeChange) unbindTabModeChange();
+  if (unbindTabFoundInPage) unbindTabFoundInPage();
+  if (unbindTabHistory) unbindTabHistory();
+});
 
-  wv.addEventListener('did-start-loading', () => {
-    emit('update-tab', { id: tabId, patch: { isLoading: true } });
-  });
-
-  wv.addEventListener('did-stop-loading', () => {
-    emit('update-tab', {
-      id: tabId,
-      patch: {
-        isLoading: false,
-        canGoBack: wv.canGoBack(),
-        canGoForward: wv.canGoForward()
+// Watch for active tab switch
+watch(
+  () => props.activeTabId,
+  (newId) => {
+    if (isElectron.value && window.electronAPI?.tabViewSwitch) {
+      const tab = props.tabs.find((t) => t.id === newId);
+      if (tab) {
+        window.electronAPI.tabViewSwitch(tab.id, tab.url);
       }
-    });
-  });
-
-  wv.addEventListener('page-title-updated', (e) => {
-    emit('update-tab', { id: tabId, patch: { title: e.title } });
-    emit('add-history', { title: e.title, url: wv.getURL() });
-  });
-
-  wv.addEventListener('page-favicon-updated', (e) => {
-    if (e.favicons && e.favicons.length > 0) {
-      emit('update-tab', { id: tabId, patch: { favicon: e.favicons[0] } });
-    }
-  });
-
-  wv.addEventListener('did-fail-load', (e) => {
-    // Error code -3 is ERR_ABORTED, standard when requests are superseded or redirected
-    if (e.errorCode === -3) return;
-    emit('update-tab', { id: tabId, patch: { isLoading: false } });
-  });
-
-  wv.addEventListener('did-navigate', (e) => {
-    emit('mode-change', 'NORMAL');
-    emit('update-tab', {
-      id: tabId,
-      patch: {
-        url: e.url,
-        canGoBack: wv.canGoBack(),
-        canGoForward: wv.canGoForward()
-      }
-    });
-    emit('add-history', { title: wv.getTitle(), url: e.url });
-  });
-
-  wv.addEventListener('did-navigate-in-page', (e) => {
-    if (e.isMainFrame) {
-      emit('mode-change', 'NORMAL');
-      emit('update-tab', {
-        id: tabId,
-        patch: {
-          url: e.url,
-          canGoBack: wv.canGoBack(),
-          canGoForward: wv.canGoForward()
-        }
-      });
-    }
-  });
-
-  wv.addEventListener('new-window', (e) => {
-    e.preventDefault();
-    emit('new-tab', e.url);
-  });
-
-  wv.addEventListener('media-started-playing', () => {
-    emit('update-tab', { id: tabId, patch: { isAudioPlaying: true } });
-  });
-
-  wv.addEventListener('media-paused', () => {
-    emit('update-tab', { id: tabId, patch: { isAudioPlaying: false } });
-  });
-
-  wv.addEventListener('found-in-page', (e) => {
-    emit('found-in-page', {
-      activeMatchOrdinal: e.result.activeMatchOrdinal,
-      matches: e.result.matches,
-      finalUpdate: e.result.finalUpdate
-    });
-  });
-
-  // Handle IPC messages from webview preload
-  wv.addEventListener('ipc-message', (e) => {
-    const data = e.channel || e.args?.[0];
-    if (!data) return;
-
-    if (data.type === 'VIM_KEY') {
-      emit('vim-key', data);
-    } else if (data.type === 'FOCUS_INPUT') {
-      emit('mode-change', 'INSERT');
-    } else if (data.type === 'BLUR_INPUT') {
-      emit('mode-change', 'NORMAL');
-    } else if (data.type === 'SCROLL_UPDATE') {
-      emit('update-tab', { id: tabId, patch: { scrollPercent: data.percent } });
-    } else if (data.type === 'PAGE_INFO') {
-      emit('update-tab', { id: tabId, patch: { title: data.title, url: data.url } });
-    }
-  });
-};
-
-const getActiveWebview = () => {
-  return webviewRefs[props.activeTabId];
-};
-
-const loadWebviewUrl = (wv, targetUrl) => {
-  if (!wv || !targetUrl) return;
-  try {
-    if (typeof wv.getURL === 'function' && wv.getURL() === targetUrl) {
-      return;
-    }
-  } catch (e) {}
-
-  if (typeof wv.loadURL === 'function') {
-    wv.loadURL(targetUrl).catch((err) => {
-      // Ignore ERR_ABORTED (-3) as it happens normally on redirects or rapid input
-      if (err && err.errno !== -3 && err.code !== 'ERR_ABORTED') {
-        console.warn('Navigation error:', err);
-      }
-    });
-  } else {
-    wv.src = targetUrl;
-  }
-};
-
-const navigateTab = (tabId, url) => {
-  const currentTab = props.tabs.find(t => t.id === tabId);
-  const wasStartPage = currentTab?.url?.startsWith('keyor://start');
-  emit('update-tab', { id: tabId, patch: { url, isLoading: true } });
-
-  // If it was start page, Vue unmounts NewTabPage and mounts <webview :src="url">,
-  // which automatically initiates the first load without a double loadURL call.
-  if (!wasStartPage) {
-    const wv = webviewRefs[tabId];
-    if (wv) {
-      loadWebviewUrl(wv, url);
     }
   }
-};
+);
+
+// Watch for tab list changes to clean up closed tabs
+watch(
+  () => props.tabs.map((t) => t.id),
+  (newIds, oldIds) => {
+    if (!isElectron.value || !oldIds) return;
+    const closedIds = oldIds.filter((id) => !newIds.includes(id));
+    closedIds.forEach((id) => {
+      window.electronAPI?.tabViewClose(id);
+    });
+  }
+);
 
 const navigateActiveTab = (url) => {
-  navigateTab(props.activeTabId, url);
+  emit('update-tab', { id: props.activeTabId, patch: { url, isLoading: !url.startsWith('keyor://') } });
+  if (isElectron.value && window.electronAPI?.tabViewNavigate) {
+    window.electronAPI.tabViewNavigate(props.activeTabId, url);
+  }
 };
 
-// Hint Mode Methods
+// Hint Mode Methods via WebContentsView executeJavaScript
 const startHintMode = async (openInNewTab = false) => {
-  const wv = getActiveWebview();
-  if (!wv) return { count: 0, codes: [] };
-
+  if (!isElectron.value || !window.electronAPI?.tabViewExecuteScript) return { count: 0, codes: [] };
   const hintCodes = generateHintCodes(80);
   try {
-    const res = await wv.executeJavaScript(getInjectHintsScript(hintCodes));
+    const res = await window.electronAPI.tabViewExecuteScript(getInjectHintsScript(hintCodes));
     return res || { count: 0, codes: [] };
   } catch (e) {
     console.error('Failed to inject hints:', e);
@@ -272,18 +215,15 @@ const startHintMode = async (openInNewTab = false) => {
 };
 
 const filterHints = (prefix) => {
-  const wv = getActiveWebview();
-  if (wv) {
-    wv.executeJavaScript(getFilterHintsScript(prefix)).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewExecuteScript) {
+    window.electronAPI.tabViewExecuteScript(getFilterHintsScript(prefix)).catch(() => {});
   }
 };
 
 const activateHint = async (code, openInNewTab = false) => {
-  const wv = getActiveWebview();
-  if (!wv) return { success: false };
-
+  if (!isElectron.value || !window.electronAPI?.tabViewExecuteScript) return { success: false };
   try {
-    return await wv.executeJavaScript(getActivateHintScript(code, openInNewTab));
+    return await window.electronAPI.tabViewExecuteScript(getActivateHintScript(code, openInNewTab));
   } catch (e) {
     console.error('Failed to activate hint:', e);
     return { success: false };
@@ -291,130 +231,120 @@ const activateHint = async (code, openInNewTab = false) => {
 };
 
 const clearHints = () => {
-  const wv = getActiveWebview();
-  if (wv) {
-    wv.executeJavaScript(getClearHintsScript()).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewExecuteScript) {
+    window.electronAPI.tabViewExecuteScript(getClearHintsScript()).catch(() => {});
   }
 };
 
-// Scrolling methods
+// Scrolling methods via native WebContentsView
 const scrollDown = (px = 120) => {
-  const wv = getActiveWebview();
-  if (wv) wv.executeJavaScript(`window.scrollBy({ top: ${px}, behavior: 'smooth' })`).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
+    window.electronAPI.tabViewScrollBy(px, 0, true);
+  }
 };
 
 const scrollUp = (px = 120) => {
-  const wv = getActiveWebview();
-  if (wv) wv.executeJavaScript(`window.scrollBy({ top: -${px}, behavior: 'smooth' })`).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
+    window.electronAPI.tabViewScrollBy(-px, 0, true);
+  }
 };
 
 const scrollHalfDown = () => {
-  const wv = getActiveWebview();
-  if (wv) wv.executeJavaScript(`window.scrollBy({ top: window.innerHeight * 0.5, behavior: 'smooth' })`).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
+    window.electronAPI.tabViewScrollBy(Math.round(window.innerHeight * 0.5), 0, true);
+  }
 };
 
 const scrollHalfUp = () => {
-  const wv = getActiveWebview();
-  if (wv) wv.executeJavaScript(`window.scrollBy({ top: -window.innerHeight * 0.5, behavior: 'smooth' })`).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
+    window.electronAPI.tabViewScrollBy(-Math.round(window.innerHeight * 0.5), 0, true);
+  }
 };
 
 const scrollToTop = () => {
-  const wv = getActiveWebview();
-  if (wv) wv.executeJavaScript(`window.scrollTo({ top: 0, behavior: 'smooth' })`).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewScrollTo) {
+    window.electronAPI.tabViewScrollTo(0, 0, true);
+  }
 };
 
 const scrollToBottom = () => {
-  const wv = getActiveWebview();
-  if (wv) wv.executeJavaScript(`window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })`).catch(() => {});
+  if (isElectron.value && window.electronAPI?.tabViewExecuteScript) {
+    window.electronAPI.tabViewExecuteScript('window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" })').catch(() => {});
+  }
 };
 
 // Zoom methods
-const zoomIn = () => {
-  const wv = getActiveWebview();
-  if (wv) {
-    wv.getZoomFactor((factor) => {
-      const newFactor = Math.min(3.0, factor + 0.1);
-      wv.setZoomFactor(newFactor);
-      emit('update-tab', { id: props.activeTabId, patch: { zoomFactor: newFactor } });
-    });
+const zoomIn = async () => {
+  if (isElectron.value && window.electronAPI?.tabViewSetZoom && window.electronAPI?.tabViewGetZoom) {
+    const factor = await window.electronAPI.tabViewGetZoom();
+    const newFactor = Math.min(3.0, factor + 0.1);
+    await window.electronAPI.tabViewSetZoom(newFactor);
+    emit('update-tab', { id: props.activeTabId, patch: { zoomFactor: newFactor } });
   }
 };
 
-const zoomOut = () => {
-  const wv = getActiveWebview();
-  if (wv) {
-    wv.getZoomFactor((factor) => {
-      const newFactor = Math.max(0.5, factor - 0.1);
-      wv.setZoomFactor(newFactor);
-      emit('update-tab', { id: props.activeTabId, patch: { zoomFactor: newFactor } });
-    });
+const zoomOut = async () => {
+  if (isElectron.value && window.electronAPI?.tabViewSetZoom && window.electronAPI?.tabViewGetZoom) {
+    const factor = await window.electronAPI.tabViewGetZoom();
+    const newFactor = Math.max(0.5, factor - 0.1);
+    await window.electronAPI.tabViewSetZoom(newFactor);
+    emit('update-tab', { id: props.activeTabId, patch: { zoomFactor: newFactor } });
   }
 };
 
-const resetZoom = () => {
-  const wv = getActiveWebview();
-  if (wv) {
-    wv.setZoomFactor(1.0);
+const resetZoom = async () => {
+  if (isElectron.value && window.electronAPI?.tabViewSetZoom) {
+    await window.electronAPI.tabViewSetZoom(1.0);
     emit('update-tab', { id: props.activeTabId, patch: { zoomFactor: 1.0 } });
   }
 };
 
 const focusFirstInput = () => {
-  const wv = getActiveWebview();
-  if (wv) {
-    wv.send('host-message', { type: 'FOCUS_FIRST_INPUT' });
+  if (isElectron.value && window.electronAPI?.tabViewFocusFirstInput) {
+    window.electronAPI.tabViewFocusFirstInput();
   }
 };
 
 const reload = (hard = false) => {
-  const wv = getActiveWebview();
-  if (wv) {
-    if (hard) wv.reloadIgnoringCache();
-    else wv.reload();
+  if (isElectron.value && window.electronAPI?.tabViewReload) {
+    window.electronAPI.tabViewReload(hard);
   }
 };
 
 const goBack = () => {
-  const wv = getActiveWebview();
-  if (wv && wv.canGoBack()) wv.goBack();
+  if (isElectron.value && window.electronAPI?.tabViewGoBack) {
+    window.electronAPI.tabViewGoBack();
+  }
 };
 
 const goForward = () => {
-  const wv = getActiveWebview();
-  if (wv && wv.canGoForward()) wv.goForward();
+  if (isElectron.value && window.electronAPI?.tabViewGoForward) {
+    window.electronAPI.tabViewGoForward();
+  }
 };
 
 // Find in page methods
 const findInPage = (text, options = {}) => {
-  const wv = getActiveWebview();
-  if (wv && text) {
-    return wv.findInPage(text, options);
+  if (isElectron.value && window.electronAPI?.tabViewFind) {
+    return window.electronAPI.tabViewFind(text, options);
   }
 };
 
 const stopFindInPage = (action = 'clearSelection') => {
-  const wv = getActiveWebview();
-  if (wv) {
-    wv.stopFindInPage(action);
+  if (isElectron.value && window.electronAPI?.tabViewStopFind) {
+    window.electronAPI.tabViewStopFind(action);
   }
 };
 
 const blurActiveWebview = () => {
-  const wv = getActiveWebview();
-  if (wv) {
-    if (typeof wv.blur === 'function') wv.blur();
-    try {
-      wv.send('host-message', { type: 'BLUR_ACTIVE' });
-    } catch (e) {}
+  if (isElectron.value && window.electronAPI?.tabViewBlur) {
+    window.electronAPI.tabViewBlur();
   }
 };
 
 const sendModeToWebview = (mode) => {
-  const wv = getActiveWebview();
-  if (wv) {
-    try {
-      wv.send('host-message', { type: 'SET_MODE', mode });
-    } catch (e) {}
+  if (isElectron.value && window.electronAPI?.tabViewSetMode) {
+    window.electronAPI.tabViewSetMode(mode);
   }
 };
 
@@ -438,7 +368,6 @@ defineExpose({
   goForward,
   findInPage,
   stopFindInPage,
-  getActiveWebview,
   blurActiveWebview,
   sendModeToWebview,
   navigateTo: navigateActiveTab
@@ -468,11 +397,10 @@ defineExpose({
   display: block;
 }
 
-.webview-frame {
+.native-view-anchor {
   width: 100%;
   height: 100%;
-  border: none;
-  background: #ffffff;
+  background: transparent;
 }
 
 .iframe-container {

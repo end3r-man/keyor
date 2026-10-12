@@ -104,12 +104,15 @@ pnpm build
 keyor/
 ├── electron/
 │   ├── main.cjs            # Electron main process (window, frameless chrome, IPC, persistence)
+│   ├── tab-views.cjs       # Native WebContentsView manager for browser tabs via BrowserWindow.contentView
 │   ├── preload.cjs         # ContextBridge preload script exposing safe desktop APIs
-│   └── webview-preload.cjs # Preload injected into <webview> to capture vim keys, detect inputs & scroll
+│   ├── themes.cjs          # Vim colorscheme engine (~/.keyor/theme.json watcher & switcher)
+│   ├── downloads.cjs       # Electron download manager with session tracking
+│   └── webview-preload.cjs # Preload injected into tabs to capture vim keys, detect inputs & scroll
 ├── src/
 │   ├── components/
 │   │   ├── BrowserHeader.vue     # Frameless titlebar, tabs with index badges, window controls
-│   │   ├── BrowserWebview.vue    # Webview container, hint injector & runner, scroll controls
+│   │   ├── BrowserWebview.vue    # Viewport anchor, hint runner & bridge to native WebContentsView
 │   │   ├── BrowserStatusline.vue # Vim airline/lualine statusline (modes, URL, stats, toasts)
 │   │   ├── OmnibarModal.vue      # Floating URL / search bar with suggestions ('o' / 'O')
 │   │   ├── CommandBar.vue        # Vim command line prompt with autocomplete (':')

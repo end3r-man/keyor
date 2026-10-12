@@ -38,12 +38,24 @@ function isEditableElement(el) {
 // Track current mode state from host
 let currentHostMode = 'NORMAL';
 
+function sendToHostOrMain(data) {
+  try {
+    ipcRenderer.send('webview-ipc-message', data);
+  } catch (e) {}
+  if (typeof ipcRenderer.sendToHost === 'function') {
+    try {
+      ipcRenderer.sendToHost(data);
+    } catch (e) {}
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
-  ipcRenderer.sendToHost({
+  sendToHostOrMain({
     type: 'PAGE_INFO',
     title: document.title,
     url: window.location.href
   });
+  checkActiveFocus();
 });
 
 // Scroll reporting
@@ -54,7 +66,7 @@ window.addEventListener('scroll', () => {
     scrollThrottleTimeout = null;
     const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
     const percent = Math.min(100, Math.max(0, Math.round((window.scrollY / maxScroll) * 100)));
-    ipcRenderer.sendToHost({
+    sendToHostOrMain({
       type: 'SCROLL_UPDATE',
       percent: percent,
       scrollY: window.scrollY
@@ -66,9 +78,9 @@ window.addEventListener('scroll', () => {
 function checkActiveFocus() {
   const active = getDeepActiveElement();
   if (isEditableElement(active)) {
-    ipcRenderer.sendToHost({ type: 'FOCUS_INPUT' });
+    sendToHostOrMain({ type: 'FOCUS_INPUT' });
   } else {
-    ipcRenderer.sendToHost({ type: 'BLUR_INPUT' });
+    sendToHostOrMain({ type: 'BLUR_INPUT' });
   }
 }
 
@@ -104,7 +116,7 @@ function handleKeyDown(e) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    ipcRenderer.sendToHost({
+    sendToHostOrMain({
       type: 'VIM_KEY',
       key: 'Escape',
       shiftKey: false,
@@ -119,7 +131,7 @@ function handleKeyDown(e) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    ipcRenderer.sendToHost({
+    sendToHostOrMain({
       type: 'VIM_KEY',
       key: e.key,
       shiftKey: e.shiftKey,
@@ -134,7 +146,7 @@ function handleKeyDown(e) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    ipcRenderer.sendToHost({
+    sendToHostOrMain({
       type: 'VIM_KEY',
       key: 't',
       shiftKey: e.shiftKey,
@@ -158,7 +170,7 @@ function handleKeyDown(e) {
       e.stopPropagation();
       e.stopImmediatePropagation();
 
-      ipcRenderer.sendToHost({
+      sendToHostOrMain({
         type: 'VIM_KEY',
         key: e.key,
         shiftKey: e.shiftKey,
@@ -175,7 +187,7 @@ function handleKeyDown(e) {
     e.stopPropagation();
     e.stopImmediatePropagation();
 
-    ipcRenderer.sendToHost({
+    sendToHostOrMain({
       type: 'VIM_KEY',
       key: e.key,
       shiftKey: e.shiftKey,

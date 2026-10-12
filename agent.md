@@ -23,7 +23,7 @@
 | Tool | Version / Purpose |
 |---|---|
 | **Vue.js** | Vue 3 (Composition API, `<script setup>`) |
-| **Electron** | Desktop shell, frameless window, native `<webview>` tags |
+| **Electron** | Desktop shell, frameless window, modern `WebContentsView` via `BrowserWindow.contentView` |
 | **Vite** | Bundler & Dev Server (`base: './'` configured) |
 | **CSS** | Vanilla CSS with dynamic CSS variables on `:root` |
 | **Package Manager** | `pnpm` |
@@ -50,15 +50,16 @@ pnpm start
 ```
 keyor/
 ├── electron/
-│   ├── main.cjs               # Main process: window lifecycle, IPC handlers, web-contents guard
+│   ├── main.cjs               # Main process: window lifecycle, IPC handlers, app readiness
+│   ├── tab-views.cjs          # Native WebContentsView manager: tab lifecycle, bounds, and mode integration
 │   ├── downloads.cjs          # Download manager: active downloads, persistence, and file actions
 │   ├── themes.cjs             # Theme manager: ~/.keyor/theme.json initialization & watcher
 │   ├── preload.cjs            # ContextBridge: safe desktop API exposure
-│   └── webview-preload.cjs    # Guest script injected into <webview>: keyboard bridge & hints
+│   └── webview-preload.cjs    # Guest script injected into tabs: keyboard capture & hints
 ├── src/
 │   ├── components/
 │   │   ├── BrowserHeader.vue       # Frameless titlebar & numbered tab bar (:1, :2, etc.)
-│   │   ├── BrowserWebview.vue      # Active webviews, hint runner, and navigation controller
+│   │   ├── BrowserWebview.vue      # Viewport anchor, hint runner, and WebContentsView bridge
 │   │   ├── BrowserStatusline.vue   # Powerline statusline (mode, zoom, scroll %, audio, downloads)
 │   │   ├── CommandBar.vue          # Vim command line (:) with live autocomplete
 │   │   ├── OmnibarModal.vue        # URL & search bar prompt (o, O, t)

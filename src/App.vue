@@ -295,10 +295,8 @@ const handleOmnibarSubmit = ({ url, inNewTab }) => {
     createTab(url, true);
     showToast(`Opened: ${url}`);
   } else {
-    const wasStartPage = activeTab.value?.url?.startsWith("keyor://start");
-    updateTab(activeTabId.value, { url, isLoading: true });
-    // If not on start page, we tell the existing mounted webview to navigate
-    if (!wasStartPage && webviewComponent.value?.navigateTo) {
+    updateTab(activeTabId.value, { url, isLoading: !url.startsWith("keyor://") });
+    if (webviewComponent.value?.navigateTo) {
       webviewComponent.value.navigateTo(url);
     }
     showToast(`Navigating: ${url}`);

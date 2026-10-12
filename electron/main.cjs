@@ -17,6 +17,7 @@ const {
   removeDownload,
   clearDownloads
 } = require('./downloads.cjs');
+const { TabViewManager } = require('./tab-views.cjs');
 
 // Path to user storage directory
 const userDataPath = app.getPath('userData');
@@ -48,6 +49,7 @@ function saveJson(filePath, data) {
 }
 
 let mainWindow = null;
+let tabViewManager = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -59,7 +61,7 @@ function createWindow() {
     frame: false, // Sleek custom titlebar and tab bar
     titleBarStyle: 'hidden',
     webPreferences: {
-      webviewTag: true,
+      webviewTag: false,
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
@@ -67,6 +69,8 @@ function createWindow() {
       spellcheck: true
     }
   });
+
+  tabViewManager = new TabViewManager(mainWindow);
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5174';
   const distPath = path.join(__dirname, '../dist/index.html');
@@ -233,6 +237,94 @@ ipcMain.handle('remove-download', (event, id) => {
 
 ipcMain.handle('clear-downloads', () => {
   return clearDownloads();
+});
+
+// WebContentsView Native Tab Management IPC Handlers
+ipcMain.handle('tab-view-create', (event, id, url) => {
+  tabViewManager?.createTabView(id, url);
+  return true;
+});
+
+ipcMain.handle('tab-view-switch', (event, id, url) => {
+  tabViewManager?.switchTab(id, url);
+  return true;
+});
+
+ipcMain.handle('tab-view-close', (event, id) => {
+  tabViewManager?.closeTab(id);
+  return true;
+});
+
+ipcMain.handle('tab-view-navigate', (event, id, url) => {
+  tabViewManager?.navigateTab(id, url);
+  return true;
+});
+
+ipcMain.handle('tab-view-set-mode', (event, mode) => {
+  tabViewManager?.setMode(mode);
+  return true;
+});
+
+ipcMain.handle('tab-view-set-bounds', (event, bounds) => {
+  tabViewManager?.setViewportBounds(bounds);
+  return true;
+});
+
+ipcMain.handle('tab-view-blur', () => {
+  tabViewManager?.blurActiveTab();
+  return true;
+});
+
+ipcMain.handle('tab-view-focus-first-input', () => {
+  tabViewManager?.focusFirstInput();
+  return true;
+});
+
+ipcMain.handle('tab-view-scroll-by', (event, top, left, smooth) => {
+  tabViewManager?.scrollBy(top, left, smooth);
+  return true;
+});
+
+ipcMain.handle('tab-view-scroll-to', (event, top, left, smooth) => {
+  tabViewManager?.scrollTo(top, left, smooth);
+  return true;
+});
+
+ipcMain.handle('tab-view-set-zoom', (event, factor) => {
+  tabViewManager?.setZoomFactor(factor);
+  return true;
+});
+
+ipcMain.handle('tab-view-get-zoom', () => {
+  return tabViewManager?.getZoomFactor() || 1.0;
+});
+
+ipcMain.handle('tab-view-reload', (event, hard) => {
+  tabViewManager?.reload(hard);
+  return true;
+});
+
+ipcMain.handle('tab-view-go-back', () => {
+  tabViewManager?.goBack();
+  return true;
+});
+
+ipcMain.handle('tab-view-go-forward', () => {
+  tabViewManager?.goForward();
+  return true;
+});
+
+ipcMain.handle('tab-view-find', (event, text, options) => {
+  return tabViewManager?.findInPage(text, options);
+});
+
+ipcMain.handle('tab-view-stop-find', (event, action) => {
+  tabViewManager?.stopFindInPage(action);
+  return true;
+});
+
+ipcMain.handle('tab-view-execute-script', async (event, script) => {
+  return await tabViewManager?.executeJavaScript(script);
 });
 
 app.whenReady().then(() => {
