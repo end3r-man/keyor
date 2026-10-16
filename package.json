@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Vim-inspired keyboard-focused web browser built with Vue.js and Electron",
+  "author": "end3r-man <enderman468@duck.com>",
   "license": "GPL-3.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -11,7 +12,10 @@
     "dev:electron": "concurrently -k \"vite\" \"wait-on tcp:5174 && electron .\"",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite build && electron ."
+    "start": "vite build && electron .",
+    "pack": "vite build && electron-builder --dir",
+    "dist": "vite build && electron-builder",
+    "dist:linux": "vite build && electron-builder --linux AppImage"
   },
   "dependencies": {
     "@lucide/vue": "^1.55.0",
@@ -21,6 +25,7 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "concurrently": "^10.0.6",
     "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "vite": "^8.3.0",
     "wait-on": "^9.5.1"
   }

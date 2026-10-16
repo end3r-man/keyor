@@ -1,0 +1,27 @@
+appId: dev.keyor.browser
+productName: Keyor
+copyright: Copyright © end3r-man
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+
+linux:
+  target:
+    - AppImage
+  icon: build/icon.png
+  category: Network;WebBrowser
+  synopsis: Vim-inspired keyboard-focused web browser
+  description: A Vim-inspired, keyboard-focused web browser built with Vue.js and Electron.
+  desktop:
+    entry:
+      Name: Keyor
+      Comment: Vim-inspired keyboard-focused web browser
+      Categories: Network;WebBrowser;
+
+artifactName: ${productName}-${version}-${arch}.${ext}
