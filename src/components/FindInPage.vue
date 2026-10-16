@@ -29,7 +29,7 @@
         </svg>
       </button>
       <button class="find-btn close-btn" @click="close" title="Close (Esc)">
-        ✕
+        <X :size="12" />
       </button>
     </div>
   </div>
@@ -37,6 +37,7 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue';
+import { X } from '@lucide/vue';
 
 const props = defineProps({
   activeMatchOrdinal: {

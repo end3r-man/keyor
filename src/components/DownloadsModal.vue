@@ -29,7 +29,7 @@
             Clear Finished
           </button>
           <button class="dl-close-btn" @click="$emit('close')" title="Close (Esc)">
-            ✕
+            <X :size="13" />
           </button>
         </div>
       </div>
@@ -37,7 +37,7 @@
       <!-- Downloads List -->
       <div class="dl-list" ref="listContainer">
         <div v-if="filteredDownloads.length === 0" class="dl-empty">
-          <span class="empty-icon">📥</span>
+          <span class="empty-icon"><Download :size="28" /></span>
           <span class="empty-text">
             {{ searchQuery ? `No downloads match "${searchQuery}"` : 'No downloads yet' }}
           </span>
@@ -59,7 +59,7 @@
         >
           <!-- File Icon -->
           <div class="dl-icon-wrap">
-            <span class="file-icon">{{ getFileIcon(item.filename) }}</span>
+            <span class="file-icon"><DynamicIcon :name="getFileIcon(item.filename)" fallback="FileText" :size="16" /></span>
           </div>
 
           <!-- Main Info -->
@@ -88,13 +88,13 @@
 
               <!-- Completed stats -->
               <span v-else-if="item.state === 'completed'" class="dl-stat-text completed-color">
-                ✓ {{ formatBytes(item.receivedBytes || item.totalBytes) }}
+                <Check class="stat-icon" :size="11" /> {{ formatBytes(item.receivedBytes || item.totalBytes) }}
                 <span v-if="!item.fileExists" class="file-missing-tag">(moved or deleted)</span>
               </span>
 
               <!-- Failed / Cancelled stats -->
               <span v-else class="dl-stat-text failed-color">
-                ✕ {{ item.state === 'cancelled' ? 'Cancelled' : 'Failed' }}
+                <X class="stat-icon" :size="11" /> {{ item.state === 'cancelled' ? 'Cancelled' : 'Failed' }}
               </span>
 
               <!-- URL origin hint -->
@@ -133,7 +133,7 @@
               @click.stop="handleShowInFolder(item)"
               title="Show in folder (f)"
             >
-              📁
+              <FolderOpen :size="13" />
             </button>
 
             <!-- Delete from history -->
@@ -142,7 +142,7 @@
               @click.stop="handleRemove(item)"
               title="Remove from list (x)"
             >
-              ✕
+              <X :size="13" />
             </button>
           </div>
         </div>
@@ -152,7 +152,7 @@
       <div class="dl-footer">
         <div class="footer-tip">
           <kbd>j</kbd>/<kbd>k</kbd> navigate &nbsp;
-          <kbd>↵</kbd> open file &nbsp;
+          <kbd><CornerDownLeft :size="10" /></kbd> open file &nbsp;
           <kbd>f</kbd> reveal in folder &nbsp;
           <kbd>x</kbd> cancel/remove &nbsp;
           <kbd>Esc</kbd> close
@@ -167,6 +167,8 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue';
+import { X, Check, Download, FolderOpen, CornerDownLeft } from '@lucide/vue';
+import DynamicIcon from './DynamicIcon.vue';
 import { useDownloads } from '../composables/useDownloads';
 
 const emit = defineEmits(['close']);
@@ -313,16 +315,16 @@ const scrollToSelected = () => {
 };
 
 const getFileIcon = (filename) => {
-  if (!filename) return '📄';
+  if (!filename) return 'FileText';
   const ext = filename.split('.').pop().toLowerCase();
-  if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar'].includes(ext)) return '📦';
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return '🖼️';
-  if (['pdf', 'doc', 'docx', 'odt'].includes(ext)) return '📕';
-  if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) return '🎬';
-  if (['mp3', 'flac', 'wav', 'ogg', 'm4a'].includes(ext)) return '🎵';
-  if (['js', 'ts', 'json', 'html', 'css', 'py', 'c', 'cpp', 'rs', 'go'].includes(ext)) return '💻';
-  if (['deb', 'rpm', 'AppImage', 'exe', 'dmg', 'iso'].includes(ext)) return '💿';
-  return '📄';
+  if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar'].includes(ext)) return 'Package';
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) return 'Image';
+  if (['pdf', 'doc', 'docx', 'odt'].includes(ext)) return 'BookOpen';
+  if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) return 'Film';
+  if (['mp3', 'flac', 'wav', 'ogg', 'm4a'].includes(ext)) return 'Music';
+  if (['js', 'ts', 'json', 'html', 'css', 'py', 'c', 'cpp', 'rs', 'go'].includes(ext)) return 'Code';
+  if (['deb', 'rpm', 'appimage', 'exe', 'dmg', 'iso'].includes(ext)) return 'Disc';
+  return 'FileText';
 };
 
 const formatDomain = (url) => {
@@ -488,7 +490,13 @@ const formatDomain = (url) => {
 }
 
 .empty-icon {
-  font-size: 28px;
+  display: flex;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.stat-icon {
+  vertical-align: -1px;
 }
 
 .empty-text {

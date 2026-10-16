@@ -48,7 +48,7 @@
 
       <!-- Audio playing indicator -->
       <div v-if="activeTab?.isAudioPlaying" class="status-stat audio-stat" title="Audio playing">
-        <span>🔊</span>
+        <Volume2 class="status-icon" />
       </div>
 
       <!-- Zoom factor -->
@@ -75,7 +75,7 @@
         @click="$emit('open-downloads')"
         :title="`Active downloads: ${activeDownloadsCount} (${overallProgress}%) • Click or press D to open`"
       >
-        <span class="dl-anim-icon">⬇</span>
+        <Download class="dl-anim-icon" :size="11" />
         <span class="stat-value">{{ overallProgress }}%</span>
         <span v-if="activeSpeed > 0" class="dl-speed-badge">{{ formatSpeed(activeSpeed) }}</span>
       </div>
@@ -85,7 +85,7 @@
         @click="$emit('open-downloads')"
         title="Downloads Manager (D / :dl)"
       >
-        ⬇
+        <Download :size="11" />
       </button>
 
       <!-- Vim Help hint -->
@@ -98,6 +98,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { Volume2, Download } from '@lucide/vue';
 import { useDownloads } from '../composables/useDownloads';
 
 const props = defineProps({

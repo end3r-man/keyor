@@ -11,7 +11,9 @@
           spellcheck="false"
           @keydown="handleKeydown"
         />
-        <button class="bm-close-btn" @click="$emit('close')">✕</button>
+        <button class="bm-close-btn" @click="$emit('close')" title="Close (Esc)">
+          <X :size="13" />
+        </button>
       </div>
 
       <div class="bm-list">
@@ -23,13 +25,13 @@
           @click="selectBookmark(bm.url)"
           @mouseenter="selectedIndex = idx"
         >
-          <span class="bm-icon">{{ bm.icon || '🔖' }}</span>
+          <span class="bm-icon"><DynamicIcon :name="bm.icon" fallback="Bookmark" :size="13" /></span>
           <div class="bm-info">
             <span class="bm-title">{{ bm.title }}</span>
             <span class="bm-url">{{ bm.url }}</span>
           </div>
           <button class="bm-del-btn" @click.stop="$emit('remove-bookmark', bm.id)" title="Delete bookmark">
-            ✕
+            <X :size="11" />
           </button>
         </div>
 
@@ -39,7 +41,7 @@
       </div>
 
       <div class="bm-footer">
-        <span><kbd>↵</kbd> open &nbsp; <kbd>j/k</kbd> navigate &nbsp; <kbd>Esc</kbd> close</span>
+        <span><kbd><CornerDownLeft :size="10" /></kbd> open &nbsp; <kbd>j/k</kbd> navigate &nbsp; <kbd>Esc</kbd> close</span>
       </div>
     </div>
   </div>
@@ -47,6 +49,8 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue';
+import { X, CornerDownLeft } from '@lucide/vue';
+import DynamicIcon from './DynamicIcon.vue';
 
 const props = defineProps({
   bookmarks: {

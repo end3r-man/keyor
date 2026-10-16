@@ -29,7 +29,7 @@
       />
       <div class="command-help-tip">
         <kbd>Tab</kbd> complete &nbsp;
-        <kbd>↵</kbd> execute &nbsp;
+        <kbd><CornerDownLeft :size="10" /></kbd> execute &nbsp;
         <kbd>Esc</kbd> cancel
       </div>
     </div>
@@ -38,6 +38,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue';
+import { CornerDownLeft } from '@lucide/vue';
 import { useTheme } from '../composables/useTheme';
 
 const emit = defineEmits(['execute', 'close']);
@@ -68,8 +69,10 @@ const AVAILABLE_COMMANDS = [
   { name: 'colorscheme', args: '<theme>', desc: 'Switch Vim theme (e.g. tokyonight, gruvbox, nord)' },
   { name: 'colo', args: '<theme>', desc: 'Vim shorthand for :colorscheme' },
   { name: 'theme', args: '<theme>', desc: 'Switch Vim theme' },
-  { name: 'themes', args: '', desc: 'Show available themes from ~/.keyor/theme.json' },
-  { name: 'themeedit', args: '', desc: 'Open ~/.keyor/theme.json in system editor' },
+  { name: 'themes', args: '', desc: 'List available colorschemes' },
+  { name: 'config', args: '', desc: 'Open ~/.keyor/init.js (keymaps, theme, options)' },
+  { name: 'themeedit', args: '', desc: 'Open ~/.keyor/init.js in system editor' },
+  { name: 'source', args: '', desc: 'Reload ~/.keyor/init.js' },
   { name: 'reload', args: '', desc: 'Reload current page' },
   { name: 'reload!', args: '', desc: 'Hard reload bypassing cache' },
   { name: 'back', args: '', desc: 'Go back in history' },
@@ -86,12 +89,6 @@ const AVAILABLE_COMMANDS = [
   { name: 'help', args: '', desc: 'Show Vim cheatsheet' },
   { name: 'quit', args: '', desc: 'Close application' }
 ];
-
-onMounted(() => {
-  nextTick(() => {
-    cmdInput.value?.focus();
-  });
-});
 
 const filteredCommands = computed(() => {
   let cleaned = commandText.value.trim().replace(/^:+/, '');

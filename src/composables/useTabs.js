@@ -129,6 +129,27 @@ export function useTabs() {
     }
   };
 
+  // Replace the whole tab list (used to restore a saved session).
+  const initTabs = (list, activeIndex = 0) => {
+    if (!Array.isArray(list) || list.length === 0) return;
+    const base = Date.now();
+    tabs.value = list.map((item, i) => ({
+      id: `tab-${base}-${i}`,
+      title: item.title || item.url || 'Keyor Home',
+      url: item.url || 'keyor://start',
+      favicon: '',
+      isLoading: !(item.url || '').startsWith('keyor://'),
+      canGoBack: false,
+      canGoForward: false,
+      isAudioPlaying: false,
+      isMuted: false,
+      zoomFactor: 1.0,
+      scrollPercent: 0
+    }));
+    const idx = Math.min(Math.max(0, activeIndex), tabs.value.length - 1);
+    activeTabId.value = tabs.value[idx].id;
+  };
+
   return {
     tabs,
     activeTabId,
@@ -143,6 +164,7 @@ export function useTabs() {
     prevTab,
     jumpToTab,
     updateTab,
-    duplicateTab
+    duplicateTab,
+    initTabs
   };
 }

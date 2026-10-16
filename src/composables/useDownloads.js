@@ -50,7 +50,7 @@ export function useDownloads() {
             downloads.value.unshift(item);
           }
           if (toastCallback) {
-            toastCallback(`Started downloading: ${item.filename} ⬇️`);
+            toastCallback(`Started downloading: ${item.filename}`);
           }
         });
       }
@@ -75,7 +75,7 @@ export function useDownloads() {
             downloads.value.unshift(item);
           }
           if (toastCallback) {
-            toastCallback(`Download complete: ${item.filename} ✅`);
+            toastCallback(`Download complete: ${item.filename}`);
           }
         });
       }
@@ -90,7 +90,7 @@ export function useDownloads() {
           }
           if (toastCallback) {
             const reason = item.state === 'cancelled' ? 'cancelled' : 'failed';
-            toastCallback(`Download ${reason}: ${item.filename} ⚠️`);
+            toastCallback(`Download ${reason}: ${item.filename}`);
           }
         });
       }

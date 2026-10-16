@@ -35,8 +35,38 @@ function isEditableElement(el) {
   return false;
 }
 
-// Track current mode state from host
+// ── Keymap configuration (pushed by the host via SET_KEYMAPS) ────────────────
+// Defaults mirror ~/.keyor/init.js so early key presses are still intercepted.
+let normalKeys = new Set('j k d u g G f F o O t T x X J K H L r R y z i b B D Y n N p P / : ? [ ] 1 2 3 4 5 6 7 8 9 0'.split(' ').filter(Boolean));
+let insertKeys = new Set(['<C-t>', '<A-t>']);
 let currentHostMode = 'NORMAL';
+
+const NAMED = {
+  Escape: 'Esc', Enter: 'CR', Backspace: 'BS', ' ': 'Space', Tab: 'Tab',
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  Delete: 'Del', Insert: 'Ins', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown'
+};
+
+function canonicalEventKey(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === '[') return '<Esc>';
+  if (e.key === 'Escape') return '<Esc>';
+  const mods = [];
+  if (e.ctrlKey) mods.push('C');
+  if (e.altKey) mods.push('A');
+  if (e.metaKey) mods.push('M');
+  const named = NAMED[e.key];
+  if (named) {
+    if (e.shiftKey && named === 'Tab') mods.push('S');
+    return mods.length ? `<${mods.join('-')}-${named}>` : `<${named}>`;
+  }
+  if (e.key.length === 1) {
+    if (e.shiftKey && /[a-zA-Z]/.test(e.key)) {
+      return mods.length ? `<${mods.join('-')}-${e.key.toUpperCase()}>` : e.key.toUpperCase();
+    }
+    return mods.length ? `<${mods.join('-')}-${e.key}>` : e.key;
+  }
+  return mods.length ? `<${mods.join('-')}-${e.key}>` : `<${e.key}>`;
+}
 
 function sendToHostOrMain(data) {
   try {
@@ -89,111 +119,48 @@ document.addEventListener('focusout', () => {
   setTimeout(checkActiveFocus, 10);
 }, true);
 
-// Pointer down handler to quickly detect clicks on non-editable elements (video players, background, buttons)
 document.addEventListener('pointerdown', () => {
   setTimeout(checkActiveFocus, 20);
 }, true);
 
-// Reserved Vim keys in NORMAL mode
-const VIM_NORMAL_KEYS = new Set([
-  'j', 'k', 'd', 'u', 'g', 'G', 'f', 'F', 'o', 'O', 't', 'x', 'r', 'R',
-  'H', 'L', 'y', '/', ':', '?', 'i', 'b', 'B', 'D', 'n', 'N', 'z', 'p', 'P',
-  'J', 'K', '1', '2', '3', '4', '5', '6', '7', '8', '9'
-]);
-
 /**
- * Intercept keyboard events in the capture phase before webpage scripts receive them
+ * Intercept keyboard events in the capture phase before webpage scripts receive them.
+ * Only keys present in the (configurable) keymap sets are intercepted.
  */
 function handleKeyDown(e) {
   const active = getDeepActiveElement();
-  const isEditing = isEditableElement(active);
+  const isEditing = isEditableElement(active) || currentHostMode === 'INSERT';
 
-  // 1. Escape key: always blur any active input element and return to NORMAL mode
-  if (e.key === 'Escape' || (e.ctrlKey && e.key === '[')) {
-    if (active && typeof active.blur === 'function') {
-      active.blur();
-    }
+  // Escape always blurs inputs and returns to NORMAL. The host is notified via
+  // the native `before-input-event` path (see tab-views.cjs) so we do not also
+  // emit a VIM_KEY here, avoiding duplicate handling.
+  if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === '[')) {
+    if (active && typeof active.blur === 'function') active.blur();
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    sendToHostOrMain({
-      type: 'VIM_KEY',
-      key: 'Escape',
-      shiftKey: false,
-      ctrlKey: false,
-      altKey: false
-    });
     return;
   }
 
-  // 2. Allow direct tab jump shortcuts (Alt+1..9 or Ctrl+1..9) even while editing
-  if ((e.altKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    sendToHostOrMain({
-      type: 'VIM_KEY',
-      key: e.key,
-      shiftKey: e.shiftKey,
-      ctrlKey: e.ctrlKey,
-      altKey: e.altKey
-    });
-    return;
-  }
+  const token = canonicalEventKey(e);
 
-  // 3. Allow Ctrl+t or Alt+t (open new tab) even while editing
-  if ((e.ctrlKey || e.altKey) && e.key.toLowerCase() === 't') {
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    sendToHostOrMain({
-      type: 'VIM_KEY',
-      key: 't',
-      shiftKey: e.shiftKey,
-      ctrlKey: e.ctrlKey,
-      altKey: e.altKey
-    });
-    return;
-  }
-
-  // 4. If actively editing an input or host mode is explicitly INSERT,
-  // let keys pass directly to webpage / input field
-  if (isEditing || currentHostMode === 'INSERT') {
-    return;
-  }
-
-  // 5. In NORMAL mode: intercept Vim keys before webpage scripts (e.g. YouTube player shortcuts)
-  if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-    if (VIM_NORMAL_KEYS.has(e.key)) {
-      // Completely halt the event from reaching YouTube / webpage listeners
+  if (isEditing) {
+    // While editing, only explicitly configured insert-mode chords are hijacked.
+    if (insertKeys.has(token)) {
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-
-      sendToHostOrMain({
-        type: 'VIM_KEY',
-        key: e.key,
-        shiftKey: e.shiftKey,
-        ctrlKey: false,
-        altKey: false
-      });
-      return;
+      sendToHostOrMain({ type: 'VIM_KEY', key: e.key, token, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
     }
+    return;
   }
 
-  // 6. Ctrl+d, Ctrl+u half page scroll, Ctrl+b, Ctrl+f
-  if (e.ctrlKey && ['d', 'u', 'b', 'f'].includes(e.key.toLowerCase())) {
+  // NORMAL mode: intercept only configured keys so pages keep the rest.
+  if (normalKeys.has(token) || (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1 && normalKeys.has(e.key))) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-
-    sendToHostOrMain({
-      type: 'VIM_KEY',
-      key: e.key,
-      shiftKey: e.shiftKey,
-      ctrlKey: true,
-      altKey: false
-    });
+    sendToHostOrMain({ type: 'VIM_KEY', key: e.key, token, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
   }
 }
 
@@ -205,13 +172,16 @@ document.addEventListener('keydown', handleKeyDown, true);
 ipcRenderer.on('host-message', (event, message) => {
   if (!message) return;
 
+  if (message.type === 'SET_KEYMAPS') {
+    if (Array.isArray(message.normalKeys)) normalKeys = new Set(message.normalKeys);
+    if (Array.isArray(message.insertKeys)) insertKeys = new Set(message.insertKeys);
+  }
+
   if (message.type === 'SET_MODE') {
     currentHostMode = message.mode;
     if (message.mode === 'NORMAL') {
       const active = getDeepActiveElement();
-      if (active && typeof active.blur === 'function') {
-        active.blur();
-      }
+      if (active && typeof active.blur === 'function') active.blur();
     }
   }
 
@@ -230,7 +200,7 @@ ipcRenderer.on('host-message', (event, message) => {
     });
     if (visibleInput) {
       visibleInput.focus();
-      ipcRenderer.sendToHost({ type: 'FOCUS_INPUT' });
+      sendToHostOrMain({ type: 'FOCUS_INPUT' });
     }
   }
 

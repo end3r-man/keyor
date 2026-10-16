@@ -16,7 +16,7 @@
           @keydown="handleKeydown"
         />
         <div class="omnibar-hints">
-          <kbd>↵</kbd> open &nbsp;
+          <kbd><CornerDownLeft :size="10" /></kbd> open &nbsp;
           <kbd>j/k</kbd> select &nbsp;
           <kbd>Esc</kbd> cancel
         </div>
@@ -54,6 +54,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue';
+import { CornerDownLeft } from '@lucide/vue';
 
 const props = defineProps({
   initialUrl: {

@@ -2,12 +2,12 @@ const { app, BrowserWindow, ipcMain, clipboard, shell, session } = require('elec
 const path = require('path');
 const fs = require('fs');
 const {
-  themeFile,
-  ensureThemeConfig,
-  loadThemeConfig,
-  saveThemeConfig,
-  setupThemeWatcher
-} = require('./themes.cjs');
+  configFile,
+  ensureConfig,
+  loadConfig,
+  saveConfig,
+  setupConfigWatcher
+} = require('./config.cjs');
 const {
   setupDownloads,
   getDownloads,
@@ -24,6 +24,7 @@ const userDataPath = app.getPath('userData');
 const bookmarksFile = path.join(userDataPath, 'bookmarks.json');
 const historyFile = path.join(userDataPath, 'history.json');
 const settingsFile = path.join(userDataPath, 'settings.json');
+const sessionFile = path.join(userDataPath, 'session.json');
 
 // Helper to safely load JSON
 function loadJson(filePath, defaultValue) {
@@ -71,11 +72,12 @@ function createWindow() {
   });
 
   tabViewManager = new TabViewManager(mainWindow);
+  // Seed each guest with the current keymap configuration.
+  tabViewManager.setKeymaps(buildKeymapPayload(loadConfig()));
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5174';
   const distPath = path.join(__dirname, '../dist/index.html');
 
-  // Try loading dev server first; fallback gracefully to local bundle if server is not active
   mainWindow.loadURL(devServerUrl).catch(() => {
     mainWindow && mainWindow.loadURL('http://localhost:5173').catch(() => {
       if (fs.existsSync(distPath)) {
@@ -98,6 +100,30 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+// Build the payload consumed by webview-preload.cjs to decide which keys to
+// intercept inside guest pages.
+function buildKeymapPayload(config) {
+  const normalKeys = new Set();
+  const insertKeys = new Set();
+  const leader = config.options?.leader || '<Space>';
+  const leaderToken = leader.length === 1 && leader !== ' ' ? leader : '<Space>';
+  const collect = (map, target) => {
+    for (const key of Object.keys(map || {})) {
+      const expanded = key.replace(/<leader>/gi, leaderToken);
+      const first = expanded.match(/^(<[^>]+>|.)/);
+      if (first) target.add(first[1]);
+    }
+  };
+  collect(config.keymaps?.normal, normalKeys);
+  collect(config.keymaps?.insert, insertKeys);
+  for (let i = 0; i <= 9; i += 1) normalKeys.add(String(i));
+  return {
+    normalKeys: Array.from(normalKeys),
+    insertKeys: Array.from(insertKeys),
+    timeoutlen: config.options?.timeoutlen || 500
+  };
 }
 
 // IPC Handlers
@@ -159,14 +185,21 @@ ipcMain.handle('get-settings', () => {
     searchEngine: 'https://duckduckgo.com/?q=',
     scrollStep: 120,
     smoothScroll: true,
-    homePage: 'keyor://start',
-    hintCharacters: 'asdfjklghweruio',
-    theme: 'dark-nord'
+    homePage: 'keyor://start'
   });
 });
 
 ipcMain.handle('save-settings', (event, settings) => {
   return saveJson(settingsFile, settings);
+});
+
+// Session persistence
+ipcMain.handle('get-session', () => {
+  return loadJson(sessionFile, { tabs: [], activeIndex: 0 });
+});
+
+ipcMain.handle('save-session', (event, payload) => {
+  return saveJson(sessionFile, payload);
 });
 
 // Clipboard
@@ -190,26 +223,27 @@ ipcMain.handle('get-webview-preload-path', () => {
   return `file://${filePath}`;
 });
 
-// Vim Theme IPC Handlers (~/.keyor/theme.json)
-ipcMain.handle('get-theme', () => {
-  return loadThemeConfig();
+// ── Config (~/.keyor/init.js) ───────────────────────────────────────────────
+ipcMain.handle('get-config', () => {
+  return loadConfig();
 });
 
-ipcMain.handle('save-theme', (event, themeData) => {
-  return saveThemeConfig(themeData);
+ipcMain.handle('save-config', (event, patch) => {
+  const ok = saveConfig(patch);
+  return ok;
 });
 
-ipcMain.handle('get-theme-path', () => {
-  return themeFile;
+ipcMain.handle('get-config-path', () => {
+  return configFile;
 });
 
-ipcMain.handle('open-theme-file', async () => {
+ipcMain.handle('open-config-file', async () => {
   try {
-    ensureThemeConfig();
-    await shell.openPath(themeFile);
+    ensureConfig();
+    await shell.openPath(configFile);
     return true;
   } catch (err) {
-    console.error('Failed to open theme file:', err);
+    console.error('Failed to open config file:', err);
     return false;
   }
 });
@@ -267,6 +301,15 @@ ipcMain.handle('tab-view-set-mode', (event, mode) => {
 
 ipcMain.handle('tab-view-set-bounds', (event, bounds) => {
   tabViewManager?.setViewportBounds(bounds);
+  return true;
+});
+
+ipcMain.handle('tab-view-get-viewport', () => {
+  return tabViewManager?.getViewportBounds() || { x: 0, y: 38, width: 1200, height: 700 };
+});
+
+ipcMain.handle('tab-view-set-keymaps', (event, payload) => {
+  tabViewManager?.setKeymaps(payload);
   return true;
 });
 
@@ -328,7 +371,7 @@ ipcMain.handle('tab-view-execute-script', async (event, script) => {
 });
 
 app.whenReady().then(() => {
-  ensureThemeConfig();
+  ensureConfig();
   createWindow();
 
   // Initialize Download Manager for both default session and webview partition
@@ -339,38 +382,11 @@ app.whenReady().then(() => {
     }
   });
 
-  // Watch ~/.keyor/theme.json for external modifications (e.g. edited in Vim/Neovim)
-  setupThemeWatcher((updatedConfig) => {
+  // Watch ~/.keyor/init.js for external modifications (like init.lua in Neovim)
+  setupConfigWatcher((config) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('theme-changed', updatedConfig);
-    }
-  });
-
-  // Handle webview guest contents
-  app.on('web-contents-created', (event, contents) => {
-    if (contents.getType() === 'webview') {
-      contents.setWindowOpenHandler(({ url }) => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('open-new-tab', url);
-        }
-        return { action: 'deny' };
-      });
-
-      contents.on('did-fail-load', (e, errorCode, errorDescription, validatedURL) => {
-        // -3 is ERR_ABORTED, standard when navigation is superseded or redirected
-        if (errorCode !== -3) {
-          console.warn(`Webview load failed: [${errorCode}] ${validatedURL}`);
-        }
-      });
-
-      // Handle before-input-event at native Chromium level
-      contents.on('before-input-event', (event, input) => {
-        if (input.type === 'keyDown' && (input.key === 'Escape' || (input.control && input.key === '['))) {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('webview-escape-pressed');
-          }
-        }
-      });
+      tabViewManager?.setKeymaps(buildKeymapPayload(config));
+      mainWindow.webContents.send('config-changed', config);
     }
   });
 

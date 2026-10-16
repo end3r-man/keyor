@@ -72,6 +72,11 @@ kbd {
   line-height: 1.2;
 }
 
+kbd svg {
+  display: inline-block;
+  vertical-align: -2px;
+}
+
 /* Clean, narrow scrollbars */
 ::-webkit-scrollbar {
   width: 4px;

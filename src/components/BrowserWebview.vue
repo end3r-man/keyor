@@ -172,11 +172,15 @@ onUnmounted(() => {
 // Watch for active tab switch
 watch(
   () => props.activeTabId,
-  (newId) => {
+  async (newId) => {
     if (isElectron.value && window.electronAPI?.tabViewSwitch) {
       const tab = props.tabs.find((t) => t.id === newId);
       if (tab) {
-        window.electronAPI.tabViewSwitch(tab.id, tab.url);
+        await window.electronAPI.tabViewSwitch(tab.id, tab.url);
+        // Restore this tab's zoom level (zoom is per-WebContentsView).
+        if (window.electronAPI?.tabViewSetZoom) {
+          window.electronAPI.tabViewSetZoom(tab.zoomFactor || 1.0);
+        }
       }
     }
   }
@@ -202,9 +206,9 @@ const navigateActiveTab = (url) => {
 };
 
 // Hint Mode Methods via WebContentsView executeJavaScript
-const startHintMode = async (openInNewTab = false) => {
+const startHintMode = async () => {
   if (!isElectron.value || !window.electronAPI?.tabViewExecuteScript) return { count: 0, codes: [] };
-  const hintCodes = generateHintCodes(80);
+  const hintCodes = generateHintCodes(500);
   try {
     const res = await window.electronAPI.tabViewExecuteScript(getInjectHintsScript(hintCodes));
     return res || { count: 0, codes: [] };
@@ -249,15 +253,34 @@ const scrollUp = (px = 120) => {
   }
 };
 
+// Use the actual guest viewport height (container bounds) rather than the
+// renderer window, which includes the header/statusline chrome.
+const viewportHeight = () => {
+  const h = containerEl.value?.getBoundingClientRect().height;
+  return h && h > 0 ? h : window.innerHeight;
+};
+
 const scrollHalfDown = () => {
   if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
-    window.electronAPI.tabViewScrollBy(Math.round(window.innerHeight * 0.5), 0, true);
+    window.electronAPI.tabViewScrollBy(Math.round(viewportHeight() * 0.5), 0, true);
   }
 };
 
 const scrollHalfUp = () => {
   if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
-    window.electronAPI.tabViewScrollBy(-Math.round(window.innerHeight * 0.5), 0, true);
+    window.electronAPI.tabViewScrollBy(-Math.round(viewportHeight() * 0.5), 0, true);
+  }
+};
+
+const scrollPageDown = () => {
+  if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
+    window.electronAPI.tabViewScrollBy(Math.round(viewportHeight() * 0.9), 0, true);
+  }
+};
+
+const scrollPageUp = () => {
+  if (isElectron.value && window.electronAPI?.tabViewScrollBy) {
+    window.electronAPI.tabViewScrollBy(-Math.round(viewportHeight() * 0.9), 0, true);
   }
 };
 
@@ -296,6 +319,14 @@ const resetZoom = async () => {
   if (isElectron.value && window.electronAPI?.tabViewSetZoom) {
     await window.electronAPI.tabViewSetZoom(1.0);
     emit('update-tab', { id: props.activeTabId, patch: { zoomFactor: 1.0 } });
+  }
+};
+
+const setZoom = async (factor) => {
+  if (isElectron.value && window.electronAPI?.tabViewSetZoom) {
+    const clamped = Math.min(3.0, Math.max(0.25, factor));
+    await window.electronAPI.tabViewSetZoom(clamped);
+    emit('update-tab', { id: props.activeTabId, patch: { zoomFactor: clamped } });
   }
 };
 
@@ -357,11 +388,14 @@ defineExpose({
   scrollUp,
   scrollHalfDown,
   scrollHalfUp,
+  scrollPageDown,
+  scrollPageUp,
   scrollToTop,
   scrollToBottom,
   zoomIn,
   zoomOut,
   resetZoom,
+  setZoom,
   focusFirstInput,
   reload,
   goBack,

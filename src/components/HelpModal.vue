@@ -6,7 +6,9 @@
           <span class="vim-tag">VIM</span>
           <h2>Keyboard Navigation Reference</h2>
         </div>
-        <button class="modal-close-btn" @click="$emit('close')" title="Close (Esc)">✕</button>
+        <button class="modal-close-btn" @click="$emit('close')" title="Close (Esc)">
+          <X :size="14" />
+        </button>
       </div>
 
       <div class="modal-search">
@@ -50,95 +52,91 @@
 
 <script setup>
 import { ref, computed } from 'vue';
+import { X } from '@lucide/vue';
+import { useKeymaps } from '../composables/useKeymaps';
+import { useCommands } from '../composables/useCommands';
+import { categoryFor } from '../keymaps/actions';
+import { parseKeys } from '../config/keymapEngine';
 
 defineEmits(['close']);
 
 const filterQuery = ref('');
 
-const SECTIONS = [
-  {
-    title: 'PAGE SCROLLING & MOTION',
-    bindings: [
-      { keys: ['j'], desc: 'Scroll down' },
-      { keys: ['k'], desc: 'Scroll up' },
-      { keys: ['d'], desc: 'Scroll half page down' },
-      { keys: ['u'], desc: 'Scroll half page up' },
-      { keys: ['gg'], desc: 'Scroll to top of page' },
-      { keys: ['G'], desc: 'Scroll to bottom of page' }
-    ]
-  },
-  {
-    title: 'HINTS & INTERACTION',
-    bindings: [
-      { keys: ['f'], desc: 'Hint mode (click link/button)' },
-      { keys: ['F'], desc: 'Hint mode (open link in new tab)' },
-      { keys: ['gi'], desc: 'Focus first text input on page' },
-      { keys: ['i'], desc: 'Enter INSERT mode (type on webpage)' },
-      { keys: ['Esc'], desc: 'Exit to NORMAL mode / dismiss hints' }
-    ]
-  },
-  {
-    title: 'TABS & BUFFERS',
-    bindings: [
-      { keys: ['t'], desc: 'Open new tab with prompt' },
-      { keys: ['d', 'x'], desc: 'Close current tab' },
-      { keys: ['J'], desc: 'Switch to next tab' },
-      { keys: ['K'], desc: 'Switch to previous tab' },
-      { keys: ['u'], desc: 'Restore recently closed tab' },
-      { keys: ['1..9', 'gt'], desc: 'Jump directly to tab N' },
-      { keys: ['b'], desc: 'Open Buffer / Tab switcher' }
-    ]
-  },
-  {
-    title: 'URLS & CLIPBOARD',
-    bindings: [
-      { keys: ['o'], desc: 'Open URL or search in current tab' },
-      { keys: ['O'], desc: 'Open URL or search in new tab' },
-      { keys: ['yy'], desc: 'Yank (copy) current page URL' },
-      { keys: ['p'], desc: 'Paste clipboard URL in current tab' },
-      { keys: ['P'], desc: 'Paste clipboard URL in new tab' },
-      { keys: ['B'], desc: 'Open Bookmarks manager' },
-      { keys: ['D'], desc: 'Open Downloads manager (:dl)' }
-    ]
-  },
-  {
-    title: 'SEARCH & COMMANDS',
-    bindings: [
-      { keys: ['/'], desc: 'Find text in active page' },
-      { keys: ['n'], desc: 'Next search match' },
-      { keys: ['N'], desc: 'Previous search match' },
-      { keys: [':'], desc: 'Enter Vim command line' },
-      { keys: ['?'], desc: 'Show this cheatsheet dialog' }
-    ]
-  },
-  {
-    title: 'THEMES & COLORSCHEMES',
-    bindings: [
-      { keys: [':colo', ':theme'], desc: 'Switch Vim theme (e.g. tokyonight, gruvbox, nord)' },
-      { keys: [':themes'], desc: 'List themes loaded from ~/.keyor/theme.json' },
-      { keys: [':themeedit'], desc: 'Open ~/.keyor/theme.json in editor' },
-      { keys: ['theme.json'], desc: 'Hot-reloads automatically when edited!' }
-    ]
-  },
-  {
-    title: 'BROWSER CONTROLS',
-    bindings: [
-      { keys: ['H'], desc: 'Go back in page history' },
-      { keys: ['L'], desc: 'Go forward in page history' },
-      { keys: ['r'], desc: 'Reload current page' },
-      { keys: ['R'], desc: 'Hard reload (bypass cache)' },
-      { keys: ['zi'], desc: 'Zoom in' },
-      { keys: ['zo'], desc: 'Zoom out' },
-      { keys: ['zz'], desc: 'Reset zoom to 100%' }
-    ]
-  }
+const keymaps = useKeymaps();
+const { AVAILABLE_COMMANDS } = useCommands({});
+
+const CATEGORY_ORDER = [
+  'Motion & Scrolling',
+  'Hints & Interaction',
+  'Tabs & Buffers',
+  'Navigation',
+  'URLs & Clipboard',
+  'Search & Commands',
+  'Bookmarks & Downloads',
+  'Zoom',
+  'Appearance & Themes',
+  'Application',
+  'Other',
 ];
+
+// Render a mapping key string ("gg", "<C-d>", "<leader>b") as kbd tokens.
+const keyToTags = (keyStr) => {
+  const leader = keymaps.options.value.leader || '<Space>';
+  const leaderToken = leader.length === 1 && leader !== ' ' ? leader : '<Space>';
+  return parseKeys(keyStr, leaderToken).map((t) =>
+    t.length > 1 && t[0] === '<' && t[t.length - 1] === '>' ? t.slice(1, -1) : t,
+  );
+};
+
+// Build the cheat sheet straight from the live (and user-editable) keymaps.
+const sections = computed(() => {
+  const maps = keymaps.config.value.keymaps || {};
+  const byCategory = new Map();
+
+  const collect = (map) => {
+    for (const [key, value] of Object.entries(map || {})) {
+      const def = typeof value === 'string' ? { action: value } : value || {};
+      const action = def.action || '';
+      const category = categoryFor(action);
+      if (!byCategory.has(category)) byCategory.set(category, []);
+      byCategory.get(category).push({
+        key,
+        keys: keyToTags(key),
+        desc: def.desc || action || key,
+      });
+    }
+  };
+  collect(maps.normal);
+  collect(maps.insert);
+
+  const result = [];
+  for (const category of CATEGORY_ORDER) {
+    if (byCategory.has(category)) {
+      result.push({ title: category.toUpperCase(), bindings: byCategory.get(category) });
+      byCategory.delete(category);
+    }
+  }
+  for (const [category, bindings] of byCategory) {
+    result.push({ title: category.toUpperCase(), bindings });
+  }
+
+  result.push({
+    title: 'COMMAND LINE',
+    bindings: AVAILABLE_COMMANDS.map((c) => ({
+      key: c.name,
+      keys: [`:${c.name}`],
+      desc: c.desc,
+    })),
+  });
+
+  return result;
+});
 
 const filteredSections = computed(() => {
   const q = filterQuery.value.trim().toLowerCase();
-  if (!q) return SECTIONS;
+  if (!q) return sections.value;
 
-  return SECTIONS.map(s => {
+  return sections.value.map(s => {
     const matchingBindings = s.bindings.filter(b =>
       b.desc.toLowerCase().includes(q) ||
       b.keys.some(k => k.toLowerCase().includes(q))

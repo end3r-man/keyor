@@ -23,18 +23,23 @@
           @mouseenter="selectedIndex = idx"
         >
           <span class="buf-num">{{ tab.originalIndex + 1 }}</span>
-          <span class="buf-icon">{{ tab.url.startsWith('keyor://') ? '⚡' : '🌐' }}</span>
+          <span class="buf-icon">
+            <Zap v-if="tab.url.startsWith('keyor://')" :size="13" />
+            <Globe v-else :size="13" />
+          </span>
           <div class="buf-info">
             <span class="buf-title">{{ tab.title }}</span>
             <span class="buf-url">{{ tab.url }}</span>
           </div>
           <span v-if="tab.id === activeTabId" class="buf-badge">ACTIVE</span>
-          <button class="buf-close" @click.stop="$emit('close-tab', tab.id)" title="Close tab (x)">✕</button>
+          <button class="buf-close" @click.stop="$emit('close-tab', tab.id)" title="Close tab (x)">
+            <X :size="11" />
+          </button>
         </div>
       </div>
 
       <div class="buffer-footer">
-        <span><kbd>↵</kbd> switch &nbsp; <kbd>j/k</kbd> navigate &nbsp; <kbd>d</kbd> close &nbsp; <kbd>Esc</kbd> cancel</span>
+        <span><kbd><CornerDownLeft :size="10" /></kbd> switch &nbsp; <kbd>j/k</kbd> navigate &nbsp; <kbd>d</kbd> close &nbsp; <kbd>Esc</kbd> cancel</span>
       </div>
     </div>
   </div>
@@ -42,6 +47,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue';
+import { Zap, Globe, X, CornerDownLeft } from '@lucide/vue';
 
 const props = defineProps({
   tabs: {

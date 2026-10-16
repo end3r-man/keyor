@@ -12,6 +12,8 @@ class TabViewManager {
     this.activeTabId = null;
     this.currentMode = 'NORMAL';
     this.preloadPath = path.join(__dirname, 'webview-preload.cjs');
+    // Keymap payload ({ normalKeys, insertKeys, timeoutlen }) forwarded to guests.
+    this.keymapPayload = null;
 
     // Default viewport bounds (Header height: 38px, Statusline height: 24px)
     this.bounds = {
@@ -115,7 +117,11 @@ class TabViewManager {
     });
 
     wc.on('did-navigate', (event, url) => {
-      this.sendToRenderer('tab-mode-change', 'NORMAL');
+      // Only reset the *active* tab's mode; background navigations must not
+      // clobber whatever mode the user is currently in.
+      if (tabId === this.activeTabId) {
+        this.sendToRenderer('tab-mode-change', 'NORMAL');
+      }
       this.sendToRenderer('tab-update', {
         id: tabId,
         patch: {
@@ -129,7 +135,9 @@ class TabViewManager {
 
     wc.on('did-navigate-in-page', (event, url, isMainFrame) => {
       if (isMainFrame) {
-        this.sendToRenderer('tab-mode-change', 'NORMAL');
+        if (tabId === this.activeTabId) {
+          this.sendToRenderer('tab-mode-change', 'NORMAL');
+        }
         this.sendToRenderer('tab-update', {
           id: tabId,
           patch: {
@@ -160,6 +168,7 @@ class TabViewManager {
 
     // Native capture-phase before-input-event for Escape
     wc.on('before-input-event', (event, input) => {
+      if (tabId !== this.activeTabId) return;
       if (input.type === 'keyDown' && (input.key === 'Escape' || (input.control && input.key === '['))) {
         this.sendToRenderer('webview-escape-pressed');
       }
@@ -168,17 +177,28 @@ class TabViewManager {
     // Listen to IPC messages from webview-preload.cjs
     wc.on('ipc-message', (event, channel, data) => {
       if (channel === 'webview-ipc-message' && data) {
+        const isActive = tabId === this.activeTabId;
         if (data.type === 'VIM_KEY') {
-          this.sendToRenderer('tab-vim-key', data);
+          if (isActive) this.sendToRenderer('tab-vim-key', data);
         } else if (data.type === 'FOCUS_INPUT') {
-          this.sendToRenderer('tab-mode-change', 'INSERT');
+          // Only the focused tab may drive the global mode.
+          if (isActive) this.sendToRenderer('tab-mode-change', 'INSERT');
         } else if (data.type === 'BLUR_INPUT') {
-          this.sendToRenderer('tab-mode-change', 'NORMAL');
+          if (isActive) this.sendToRenderer('tab-mode-change', 'NORMAL');
         } else if (data.type === 'SCROLL_UPDATE') {
           this.sendToRenderer('tab-update', { id: tabId, patch: { scrollPercent: data.percent } });
         } else if (data.type === 'PAGE_INFO') {
           this.sendToRenderer('tab-update', { id: tabId, patch: { title: data.title, url: data.url } });
         }
+      }
+    });
+
+    // Forward the current keymap config to each guest as soon as it is ready.
+    wc.on('dom-ready', () => {
+      if (this.keymapPayload) {
+        try {
+          wc.send('host-message', { type: 'SET_KEYMAPS', ...this.keymapPayload });
+        } catch (e) {}
       }
     });
 
@@ -304,7 +324,9 @@ class TabViewManager {
 
     let targetBounds = { ...this.bounds };
 
-    if (['NORMAL', 'INSERT'].includes(this.currentMode)) {
+    if (['NORMAL', 'INSERT', 'HINT'].includes(this.currentMode)) {
+      // HINT mode keeps the page visible: hint labels are injected into the DOM,
+      // only keyboard focus moves to the renderer chrome.
       activeView.setBounds(targetBounds);
       activeView.setVisible(true);
     } else if (this.currentMode === 'COMMAND') {
@@ -322,6 +344,20 @@ class TabViewManager {
       // Modal overlays (OMNIBAR, HELP, BUFFER, BOOKMARKS, DOWNLOADS)
       // Hide view so native Chromium does not block Vue modal UI or steal keys
       activeView.setVisible(false);
+    }
+  }
+
+  getViewportBounds() {
+    return { ...this.bounds };
+  }
+
+  setKeymaps(payload) {
+    this.keymapPayload = payload || null;
+    if (!payload) return;
+    for (const view of this.views.values()) {
+      try {
+        view.webContents.send('host-message', { type: 'SET_KEYMAPS', ...payload });
+      } catch (e) {}
     }
   }
 

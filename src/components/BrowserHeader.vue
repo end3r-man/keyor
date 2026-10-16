@@ -64,7 +64,7 @@
         
         <span v-if="tab.isLoading" class="tab-spinner"></span>
         <span v-else class="tab-favicon">
-          <span v-if="tab.url.startsWith('keyor://')">⚡</span>
+          <Zap v-if="tab.url.startsWith('keyor://')" class="icon-small" />
           <img v-else-if="tab.favicon" :src="tab.favicon" class="favicon-img" alt="" />
           <svg v-else class="icon-small" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"></circle>
@@ -153,6 +153,7 @@
 </template>
 
 <script setup>
+import { Zap } from '@lucide/vue';
 import { useTabs } from '../composables/useTabs';
 
 const props = defineProps({

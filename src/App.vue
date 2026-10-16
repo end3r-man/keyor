@@ -40,7 +40,7 @@
       :activeTab="activeTab"
       :activeIndex="activeTabIndex"
       :totalTabs="tabs.length"
-      :keyBuffer="keyBuffer"
+      :keyBuffer="statusBuffer"
       :hintBuffer="hintBuffer"
       :toastMessage="toastMessage"
       @open-omnibar="openOmnibarCurrent"
@@ -78,7 +78,7 @@
     />
 
     <!-- Help Modal ('?') -->
-    <HelpModal v-if="currentMode === 'HELP'" @close="closeHelpModal" />
+    <HelpModal v-if="currentMode === 'HELP'" @close="closeModalToNormal" />
 
     <!-- Buffer / Tab Switcher ('b') -->
     <BufferSwitcher
@@ -87,7 +87,7 @@
       :activeTabId="activeTabId"
       @select-tab="setActiveTab"
       @close-tab="closeTab"
-      @close="closeBufferSwitcher"
+      @close="closeModalToNormal"
     />
 
     <!-- Bookmarks Manager ('B') -->
@@ -96,19 +96,19 @@
       :bookmarks="bookmarks"
       @open-bookmark="handleOpenBookmark"
       @remove-bookmark="removeBookmark"
-      @close="closeBookmarksModal"
+      @close="closeModalToNormal"
     />
 
     <!-- Downloads Manager ('D' / :dl) -->
     <DownloadsModal
       v-if="currentMode === 'DOWNLOADS'"
-      @close="closeDownloadsModal"
+      @close="closeModalToNormal"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
 import BrowserHeader from "./components/BrowserHeader.vue";
 import BrowserWebview from "./components/BrowserWebview.vue";
 import BrowserStatusline from "./components/BrowserStatusline.vue";
@@ -126,6 +126,13 @@ import { useHistory } from "./composables/useHistory";
 import { useVimKeybindings } from "./composables/useVimKeybindings";
 import { useTheme } from "./composables/useTheme";
 import { useDownloads } from "./composables/useDownloads";
+import { useKeymaps } from "./composables/useKeymaps";
+import { useCommands } from "./composables/useCommands";
+import { useSession } from "./composables/useSession";
+import { createActionRunner } from "./keymaps/actions";
+import { canonicalEventKey } from "./config/keymapEngine";
+
+const MODAL_MODES = ["OMNIBAR", "COMMAND", "FIND", "HELP", "BUFFER", "BOOKMARKS", "DOWNLOADS"];
 
 const appRoot = ref(null);
 const webviewComponent = ref(null);
@@ -144,6 +151,7 @@ const {
   jumpToTab,
   updateTab,
   duplicateTab,
+  initTabs,
 } = useTabs();
 
 const { bookmarks, addBookmark, removeBookmark } = useBookmarks();
@@ -151,15 +159,21 @@ const { history, addHistoryEntry } = useHistory();
 
 const {
   currentMode,
-  keyBuffer,
   hintBuffer,
   isHintNewTab,
   toastMessage,
   showToast,
   setMode: rawSetMode,
-  appendKeyBuffer,
-  clearKeyBuffer,
 } = useVimKeybindings();
+
+const keymaps = useKeymaps();
+const { options, pendingText, pendingCount } = keymaps;
+
+// Statusline buffer shows the pending keymap sequence plus any count prefix.
+const statusBuffer = computed(() => {
+  const n = pendingCount.value;
+  return (n > 1 ? String(n) : "") + pendingText.value;
+});
 
 const setMode = (mode) => {
   rawSetMode(mode);
@@ -168,20 +182,23 @@ const setMode = (mode) => {
     window.focus();
   }
   webviewComponent.value?.sendModeToWebview(mode);
+  // Only NORMAL / INSERT drive the keymap trie; other modes reset it.
+  keymaps.setMode(mode === "INSERT" ? "insert" : "normal");
+  if (mode !== "NORMAL" && mode !== "INSERT") keymaps.reset();
 };
 
 const {
   activeThemeName,
-  currentTheme,
   availableThemeNames,
-  availableThemesList,
   themePath,
-  initTheme,
+  setThemes,
+  applyConfig: applyThemeConfig,
   switchTheme,
-  openConfigFile
+  openConfigFile,
 } = useTheme();
 
 const { initDownloads, registerToastCallback } = useDownloads();
+const session = useSession();
 
 // Modal States
 const omnibarInitialUrl = ref("");
@@ -191,15 +208,13 @@ const activeHintCodes = ref([]);
 // Find in page stats
 const findMatchOrdinal = ref(0);
 const findTotalMatches = ref(0);
+const lastFindText = ref("");
 
 // Ensure DOM focus returns to the app root so keybindings are always active
 const ensureFocus = () => {
   nextTick(() => {
     const active = document.activeElement;
-    if (
-      active &&
-      (active.tagName === "INPUT" || active.tagName === "TEXTAREA")
-    ) {
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
       active.blur();
     }
     if (appRoot.value) {
@@ -214,44 +229,8 @@ const handleAppClick = () => {
   }
 };
 
-let unbindOpenNewTab = null;
-let unbindWebviewEscape = null;
-
-onMounted(() => {
-  initTheme();
-  initDownloads();
-  registerToastCallback(showToast);
-  window.addEventListener("keydown", handleGlobalKeydown, true);
-  if (window.electronAPI?.onOpenNewTab) {
-    unbindOpenNewTab = window.electronAPI.onOpenNewTab((url) => {
-      if (url) {
-        createTab(url, true);
-        showToast(`Opened tab: ${url}`);
-      }
-    });
-  }
-  if (window.electronAPI?.onWebviewEscape) {
-    unbindWebviewEscape = window.electronAPI.onWebviewEscape(() => {
-      handleVimKey("Escape");
-    });
-  }
-  ensureFocus();
-});
-
-onUnmounted(() => {
-  window.removeEventListener("keydown", handleGlobalKeydown, true);
-  if (unbindOpenNewTab) unbindOpenNewTab();
-  if (unbindWebviewEscape) unbindWebviewEscape();
-});
-
-const onTabUpdate = ({ id, patch }) => {
-  updateTab(id, patch);
-};
-
-const onAddHistory = ({ title, url }) => {
-  addHistoryEntry(title, url);
-};
-
+const onTabUpdate = ({ id, patch }) => updateTab(id, patch);
+const onAddHistory = ({ title, url }) => addHistoryEntry(title, url);
 const onFoundInPage = ({ activeMatchOrdinal, matches }) => {
   findMatchOrdinal.value = activeMatchOrdinal;
   findTotalMatches.value = matches;
@@ -259,19 +238,13 @@ const onFoundInPage = ({ activeMatchOrdinal, matches }) => {
 
 // Handlers for Header buttons
 const handleNewTab = () => {
-  createTab("keyor://start", true);
+  createTab(options.value.homePage || "keyor://start", true);
   showToast("Opened new tab");
   ensureFocus();
 };
 
-const handleNavBack = () => {
-  webviewComponent.value?.goBack();
-};
-
-const handleNavForward = () => {
-  webviewComponent.value?.goForward();
-};
-
+const handleNavBack = () => webviewComponent.value?.goBack();
+const handleNavForward = () => webviewComponent.value?.goForward();
 const handleNavReload = () => {
   webviewComponent.value?.reload();
   showToast("Reloading page");
@@ -296,9 +269,7 @@ const handleOmnibarSubmit = ({ url, inNewTab }) => {
     showToast(`Opened: ${url}`);
   } else {
     updateTab(activeTabId.value, { url, isLoading: !url.startsWith("keyor://") });
-    if (webviewComponent.value?.navigateTo) {
-      webviewComponent.value.navigateTo(url);
-    }
+    webviewComponent.value?.navigateTo?.(url);
     showToast(`Navigating: ${url}`);
   }
   setMode("NORMAL");
@@ -310,257 +281,9 @@ const closeOmnibar = () => {
   ensureFocus();
 };
 
-// Vim Command Bar Execution
 const executeVimCommand = async (rawCommand) => {
-  let text = (rawCommand || "").trim();
-  // Strip leading colons (e.g., ':1' -> '1', ':::open' -> 'open')
-  text = text.replace(/^:+/, "").trim();
-
-  if (!text) {
-    setMode("NORMAL");
-    ensureFocus();
-    return;
-  }
-
-  const parts = text.split(/\s+/);
-  let cmd = parts[0]?.toLowerCase() || "";
-  const args = parts.slice(1).join(" ");
-
-  setMode("NORMAL");
+  await commands.execute(rawCommand);
   ensureFocus();
-
-  // 1. Direct number e.g. ':1', ':2', ':3'
-  if (/^\d+$/.test(cmd)) {
-    const tabIndex = parseInt(cmd, 10);
-    const ok = jumpToTab(tabIndex);
-    if (ok) {
-      showToast(`Jumped to tab ${tabIndex}`);
-    } else {
-      showToast(`Tab ${tabIndex} does not exist (${tabs.value.length} open)`);
-    }
-    return;
-  }
-
-  // 2. Buffer number shorthand e.g. ':b1', ':b2', ':tab1'
-  if (/^b\d+$/.test(cmd)) {
-    const tabIndex = parseInt(cmd.slice(1), 10);
-    const ok = jumpToTab(tabIndex);
-    if (ok) {
-      showToast(`Jumped to tab ${tabIndex}`);
-    } else {
-      showToast(`Tab ${tabIndex} does not exist (${tabs.value.length} open)`);
-    }
-    return;
-  }
-
-  if (/^tab\d+$/.test(cmd)) {
-    const tabIndex = parseInt(cmd.slice(3), 10);
-    const ok = jumpToTab(tabIndex);
-    if (ok) {
-      showToast(`Jumped to tab ${tabIndex}`);
-    } else {
-      showToast(`Tab ${tabIndex} does not exist (${tabs.value.length} open)`);
-    }
-    return;
-  }
-
-  // 3. Named commands
-  switch (cmd) {
-    case "o":
-    case "open":
-      if (args) {
-        handleOmnibarSubmit({ url: args, inNewTab: false });
-      } else {
-        openOmnibarCurrent();
-      }
-      break;
-
-    case "t":
-    case "tabnew":
-      if (args) {
-        createTab(args, true);
-        showToast(`Opened tab: ${args}`);
-      } else {
-        createTab("keyor://start", true);
-        showToast("Opened new tab");
-      }
-      break;
-
-    case "q":
-    case "close":
-    case "tabclose":
-      closeTab(activeTabId.value);
-      showToast("Closed tab");
-      break;
-
-    case "tabnext":
-    case "tn":
-    case "bnext":
-      nextTab();
-      showToast(`Tab ${activeTabIndex.value + 1}/${tabs.value.length}`);
-      break;
-
-    case "tabprev":
-    case "tp":
-    case "bprev":
-      prevTab();
-      showToast(`Tab ${activeTabIndex.value + 1}/${tabs.value.length}`);
-      break;
-
-    case "b":
-    case "buffer":
-    case "tab":
-      if (args) {
-        const num = parseInt(args, 10);
-        if (!isNaN(num)) {
-          const ok = jumpToTab(num);
-          if (ok) {
-            showToast(`Jumped to tab ${num}`);
-          } else {
-            showToast(`Tab ${num} does not exist (${tabs.value.length} open)`);
-          }
-        } else {
-          // Find by title search
-          const found = tabs.value.find(
-            (t) =>
-              t.title.toLowerCase().includes(args.toLowerCase()) ||
-              t.url.toLowerCase().includes(args.toLowerCase()),
-          );
-          if (found) {
-            setActiveTab(found.id);
-            showToast(`Switched to: ${found.title}`);
-          } else {
-            showToast(`No tab matching "${args}"`);
-          }
-        }
-      } else {
-        setMode("BUFFER");
-      }
-      break;
-
-    case "buffers":
-      setMode("BUFFER");
-      break;
-
-    case "r":
-    case "reload":
-      webviewComponent.value?.reload(false);
-      showToast("Reloading page");
-      break;
-
-    case "reload!":
-    case "R":
-      webviewComponent.value?.reload(true);
-      showToast("Hard reloading (cache bypassed)");
-      break;
-
-    case "back":
-      webviewComponent.value?.goBack();
-      break;
-
-    case "forward":
-      webviewComponent.value?.goForward();
-      break;
-
-    case "y":
-    case "yank":
-      await handleYankUrl();
-      break;
-
-    case "bm":
-    case "bookmark":
-      await addBookmark(args || activeTab.value?.title, activeTab.value?.url);
-      showToast("Bookmarked current page 🔖");
-      break;
-
-    case "bookmarks":
-      setMode("BOOKMARKS");
-      break;
-
-    case "downloads":
-    case "dl":
-      setMode("DOWNLOADS");
-      break;
-
-    case "history":
-      createTab("keyor://start", true);
-      break;
-
-    case "zoom":
-      if (args) {
-        const pct = parseInt(args, 10);
-        if (!isNaN(pct)) {
-          const factor = pct / 100;
-          const wv = webviewComponent.value?.getActiveWebview();
-          if (wv) wv.setZoomFactor(factor);
-          updateTab(activeTabId.value, { zoomFactor: factor });
-          showToast(`Zoom set to ${pct}%`);
-        }
-      }
-      break;
-
-    case "fullscreen":
-      if (window.electronAPI) {
-        window.electronAPI.windowAction("toggle-fullscreen");
-      }
-      break;
-
-    case "devtools":
-    case "inspect":
-      if (window.electronAPI) {
-        window.electronAPI.windowAction("toggle-devtools");
-      }
-      break;
-
-    case "h":
-    case "help":
-      setMode("HELP");
-      break;
-
-    case "colorscheme":
-    case "colo":
-    case "cs":
-    case "theme":
-      if (args) {
-        const res = await switchTheme(args);
-        if (res.success) {
-          showToast(`colorscheme ${res.themeId} (${res.themeName}) 🎨`);
-        } else {
-          showToast(`Cannot find theme '${args}'. Available: ${res.available?.join(', ')}`);
-        }
-      } else {
-        showToast(`colorscheme: ${activeThemeName.value} (~/.keyor/theme.json)`);
-      }
-      break;
-
-    case "themes":
-    case "colorschemes":
-      showToast(`Themes: ${availableThemeNames.value.join(', ')}`);
-      break;
-
-    case "themeedit":
-    case "edittheme":
-      {
-        const opened = await openConfigFile();
-        if (opened) {
-          showToast(`Opened ${themePath.value} 🛠️`);
-        } else {
-          showToast(`Config: ${themePath.value}`);
-        }
-      }
-      break;
-
-    case "quit":
-    case "qa":
-      if (window.electronAPI) {
-        window.electronAPI.windowAction("close");
-      }
-      break;
-
-    default:
-      showToast(`Unknown command: :${cmd}`);
-      break;
-  }
 };
 
 const closeCommandBar = () => {
@@ -570,15 +293,34 @@ const closeCommandBar = () => {
 
 // Find In Page
 const handleFindSearch = (text) => {
+  lastFindText.value = text;
   webviewComponent.value?.findInPage(text, { forward: true, findNext: false });
 };
 
 const handleFindNext = (text) => {
-  webviewComponent.value?.findInPage(text, { forward: true, findNext: true });
+  if (text) lastFindText.value = text;
+  webviewComponent.value?.findInPage(lastFindText.value, { forward: true, findNext: true });
 };
 
 const handleFindPrev = (text) => {
-  webviewComponent.value?.findInPage(text, { forward: false, findNext: true });
+  if (text) lastFindText.value = text;
+  webviewComponent.value?.findInPage(lastFindText.value, { forward: false, findNext: true });
+};
+
+const findNextDefault = () => {
+  if (!lastFindText.value) {
+    showToast("No active search");
+    return;
+  }
+  webviewComponent.value?.findInPage(lastFindText.value, { forward: true, findNext: true });
+};
+
+const findPrevDefault = () => {
+  if (!lastFindText.value) {
+    showToast("No active search");
+    return;
+  }
+  webviewComponent.value?.findInPage(lastFindText.value, { forward: false, findNext: true });
 };
 
 const closeFind = () => {
@@ -589,41 +331,14 @@ const closeFind = () => {
   ensureFocus();
 };
 
-// Help Modal
-const openHelpModal = () => {
-  setMode("HELP");
-};
-
-const closeHelpModal = () => {
+// Modals
+const openHelpModal = () => setMode("HELP");
+const closeModalToNormal = () => {
   setMode("NORMAL");
   ensureFocus();
 };
-
-// Buffer Switcher
-const closeBufferSwitcher = () => {
-  setMode("NORMAL");
-  ensureFocus();
-};
-
-// Bookmarks Modal
-const handleOpenBookmark = (url) => {
-  handleOmnibarSubmit({ url, inNewTab: false });
-};
-
-const closeBookmarksModal = () => {
-  setMode("NORMAL");
-  ensureFocus();
-};
-
-// Downloads Modal
-const openDownloadsModal = () => {
-  setMode("DOWNLOADS");
-};
-
-const closeDownloadsModal = () => {
-  setMode("NORMAL");
-  ensureFocus();
-};
+const handleOpenBookmark = (url) => handleOmnibarSubmit({ url, inNewTab: false });
+const openDownloadsModal = () => setMode("DOWNLOADS");
 
 // Clipboard URL Yank
 const handleYankUrl = async () => {
@@ -635,7 +350,7 @@ const handleYankUrl = async () => {
     } else {
       await navigator.clipboard.writeText(url);
     }
-    showToast(`Yanked: ${url} 📋`);
+    showToast(`Yanked: ${url}`);
   } catch (e) {
     showToast("Failed to copy URL");
   }
@@ -654,10 +369,7 @@ const handlePasteOpen = async (newTab = false) => {
     showToast("Cannot read clipboard");
     return;
   }
-
-  if (text) {
-    handleOmnibarSubmit({ url: text.trim(), inNewTab: newTab });
-  }
+  if (text) handleOmnibarSubmit({ url: text.trim(), inNewTab: newTab });
 };
 
 // Hint Mode Runner
@@ -671,13 +383,10 @@ const enterHintMode = async (newTab = false) => {
   setMode("HINT");
   hintBuffer.value = "";
 
-  const res = await webviewComponent.value?.startHintMode(newTab);
+  const res = await webviewComponent.value?.startHintMode();
   if (res && res.codes && res.codes.length > 0) {
     activeHintCodes.value = res.codes;
-    showToast(
-      newTab ? "HINT (New Tab): Type letters" : "HINT: Type letters to click",
-      1800,
-    );
+    showToast(newTab ? "HINT (New Tab): Type letters" : "HINT: Type letters to click", 1800);
   } else {
     showToast("No clickable elements found");
     setMode("NORMAL");
@@ -688,21 +397,16 @@ const enterHintMode = async (newTab = false) => {
 const processHintInput = async (char) => {
   const nextBuffer = hintBuffer.value + char.toLowerCase();
   hintBuffer.value = nextBuffer;
-
   webviewComponent.value?.filterHints(nextBuffer);
 
-  // Check exact match
   if (activeHintCodes.value.includes(nextBuffer)) {
-    const res = await webviewComponent.value?.activateHint(
-      nextBuffer,
-      isHintNewTab.value,
-    );
+    const res = await webviewComponent.value?.activateHint(nextBuffer, isHintNewTab.value);
     if (res && res.newTab && res.openUrl) {
       createTab(res.openUrl, true);
       showToast(`Opened: ${res.openUrl} in new tab`);
     } else if (res && res.focusedInput) {
       setMode("INSERT");
-      showToast("INSERT mode");
+      showToast("-- INSERT --", 1200);
       return;
     }
     webviewComponent.value?.clearHints();
@@ -712,10 +416,7 @@ const processHintInput = async (char) => {
     return;
   }
 
-  // Check if any code starts with prefix
-  const hasPrefixMatch = activeHintCodes.value.some((code) =>
-    code.startsWith(nextBuffer),
-  );
+  const hasPrefixMatch = activeHintCodes.value.some((code) => code.startsWith(nextBuffer));
   if (!hasPrefixMatch) {
     showToast(`No match for '${nextBuffer}'`);
     webviewComponent.value?.clearHints();
@@ -725,377 +426,216 @@ const processHintInput = async (char) => {
   }
 };
 
-// Webview Preload IPC Bridge
-const onWebviewVimKey = (eventData) => {
-  handleVimKey(eventData.key, eventData);
+// ── Action context & runner ─────────────────────────────────────────────────
+const ctx = {
+  state: { tabs, activeTab, activeTabId, activeTabIndex },
+  tabs: {
+    createTab, closeTab, restoreClosedTab, setActiveTab,
+    nextTab, prevTab, jumpToTab, updateTab, duplicateTab,
+  },
+  options: () => options.value,
+  webview: () => webviewComponent.value,
+  omnibar: {
+    openCurrent: openOmnibarCurrent,
+    openNew: openOmnibarNewTab,
+    submit: handleOmnibarSubmit,
+  },
+  hints: { enter: enterHintMode },
+  ui: { setMode, showToast },
+  find: { next: findNextDefault, prev: findPrevDefault },
+  clipboard: { yank: handleYankUrl, paste: handlePasteOpen },
+  bookmarks: { add: addBookmark, remove: removeBookmark, list: () => bookmarks.value },
+  window: {
+    fullscreen: () => window.electronAPI?.windowAction("toggle-fullscreen"),
+    devtools: () => window.electronAPI?.windowAction("toggle-devtools"),
+    quit: () => window.electronAPI?.windowAction("close"),
+  },
+  theme: {
+    switchTheme,
+    list: () => availableThemeNames.value,
+    active: () => activeThemeName.value,
+    editConfig: openConfigFile,
+    get path() { return themePath.value; },
+  },
+  commands: { run: (cmd) => commands.execute(cmd) },
+  reloadConfig: async () => {
+    const cfg = await keymaps.reloadConfig();
+    applyThemeConfig(cfg);
+    pushKeymaps();
+  },
+};
+
+const commands = useCommands(ctx);
+const actions = createActionRunner(ctx);
+keymaps.setResolver((res) =>
+  actions.run(res.action, { args: res.args, count: res.count, keys: res.keys, meta: res.meta }),
+);
+
+const pushKeymaps = () => {
+  if (!window.electronAPI?.tabViewSetKeymaps) return;
+  window.electronAPI.tabViewSetKeymaps({
+    normalKeys: keymaps.interceptKeys("normal"),
+    insertKeys: keymaps.interceptKeys("insert"),
+    timeoutlen: options.value.timeoutlen || 500,
+  });
+};
+
+// ── Escape / mode dispatch ──────────────────────────────────────────────────
+const handleEscape = () => {
+  if (currentMode.value === "HINT") {
+    webviewComponent.value?.clearHints();
+    hintBuffer.value = "";
+  }
+  keymaps.reset();
+  setMode("NORMAL");
+  webviewComponent.value?.blurActiveWebview();
+  ensureFocus();
+  showToast("-- NORMAL --", 1000);
+};
+
+const isEditableTarget = (el) => {
+  if (!el) return false;
+  return (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.isContentEditable === true
+  );
+};
+
+const canonicalFromParts = (d) => {
+  const key = d.key === " " ? " " : d.key;
+  return canonicalEventKey({
+    key,
+    ctrlKey: !!d.ctrlKey,
+    altKey: !!d.altKey,
+    shiftKey: !!d.shiftKey,
+    metaKey: !!d.metaKey,
+  });
+};
+
+// ── Webview preload IPC bridge ──────────────────────────────────────────────
+const onWebviewVimKey = (data) => {
+  if (currentMode.value === "HINT") {
+    if (/^[a-zA-Z]$/.test(data.key)) processHintInput(data.key);
+    return;
+  }
+  const token = data.token || canonicalFromParts(data);
+  if (token === "<Esc>") {
+    handleEscape();
+    return;
+  }
+  const mode = currentMode.value === "INSERT" ? "insert" : "normal";
+  keymaps.feedToken(mode, token, data);
 };
 
 const onWebviewModeChange = (mode) => {
+  if (mode === currentMode.value) return;
   setMode(mode);
-  if (mode === "INSERT") {
-    showToast("-- INSERT --", 1200);
-  } else if (mode === "NORMAL") {
-    ensureFocus();
-  }
+  if (mode === "INSERT") showToast("-- INSERT --", 1200);
+  else if (mode === "NORMAL") ensureFocus();
 };
 
-// Global Keydown Handler (Attached to window in capture phase)
+// ── Global keydown (renderer chrome has focus) ──────────────────────────────
 const handleGlobalKeydown = (e) => {
-  // 1. If currently in an open modal (COMMAND, OMNIBAR, FIND, HELP, BUFFER, BOOKMARKS, DOWNLOADS)
-  if (
-    ["OMNIBAR", "COMMAND", "FIND", "HELP", "BUFFER", "BOOKMARKS", "DOWNLOADS"].includes(
-      currentMode.value,
-    )
-  ) {
+  // Modals own their typing; Escape always dismisses them (capture phase wins).
+  if (MODAL_MODES.includes(currentMode.value)) {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      setMode("NORMAL");
-      ensureFocus();
-      showToast("-- NORMAL --", 1000);
-      return;
-    }
-    // Allow the modal's input element to receive keystrokes
-    return;
-  }
-
-  // 2. If an editable element outside modals has focus (e.g., search input on start page)
-  const active = document.activeElement;
-  const isEditing =
-    active &&
-    (active.tagName === "INPUT" ||
-      active.tagName === "TEXTAREA" ||
-      active.isContentEditable);
-  if (isEditing) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      active.blur();
-      ensureFocus();
-      setMode("NORMAL");
-      showToast("-- NORMAL --", 1000);
-      return;
-    }
-    // Allow Ctrl+t / Alt+t even while editing
-    if ((e.ctrlKey || e.altKey) && e.key.toLowerCase() === "t") {
-      e.preventDefault();
-      e.stopPropagation();
-      openOmnibarNewTab();
-      return;
+      handleEscape();
     }
     return;
   }
 
-  // Universal new tab shortcut: Ctrl+t / Alt+t
-  if ((e.ctrlKey || e.altKey) && e.key.toLowerCase() === "t") {
+  const editing = isEditableTarget(document.activeElement) || currentMode.value === "INSERT";
+
+  if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && e.key === "[")) {
     e.preventDefault();
     e.stopPropagation();
-    openOmnibarNewTab();
+    handleEscape();
     return;
   }
 
-  // 3. Normal / Hint mode: prevent default for standard Vim nav keys
-  if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-    const vimNavKeys = [
-      "j",
-      "k",
-      "d",
-      "u",
-      "f",
-      "F",
-      "o",
-      "O",
-      "t",
-      "x",
-      "J",
-      "K",
-      "H",
-      "L",
-      "r",
-      "R",
-      "/",
-      ":",
-      "?",
-      "b",
-      "B",
-      "D",
-    ];
-    if (vimNavKeys.includes(e.key)) {
+  if (editing) {
+    const res = keymaps.feedEvent("insert", e);
+    if (res && (res.status === "consumed" || res.status === "pending" || res.status === "count")) {
       e.preventDefault();
-    }
-  }
-
-  handleVimKey(e.key, e);
-};
-
-// Central Vim Dispatcher
-const handleVimKey = async (key, event = {}) => {
-  // Escape Key: always reset to NORMAL
-  if (key === "Escape" || (event.ctrlKey && key === "[")) {
-    if (currentMode.value === "HINT") {
-      webviewComponent.value?.clearHints();
-      hintBuffer.value = "";
-    }
-    setMode("NORMAL");
-    clearKeyBuffer();
-    webviewComponent.value?.blurActiveWebview();
-    ensureFocus();
-    showToast("-- NORMAL --", 1000);
-    return;
-  }
-
-  // Universal shortcut: Ctrl+t or Alt+t (New Tab Omnibar)
-  if ((event.ctrlKey || event.altKey) && (key === "t" || key === "T")) {
-    if (event.preventDefault) event.preventDefault();
-    openOmnibarNewTab();
-    return;
-  }
-
-  // Universal shortcut: Alt+1..9 or Ctrl+1..9 (Direct tab jumping)
-  if ((event.altKey || event.ctrlKey) && /^[1-9]$/.test(key)) {
-    if (event.preventDefault) event.preventDefault();
-    const tabNum = parseInt(key, 10);
-    const ok = jumpToTab(tabNum);
-    if (ok) {
-      showToast(`Jumped to tab ${tabNum}`);
-    } else {
-      showToast(`Tab ${tabNum} does not exist (${tabs.value.length} open)`);
+      e.stopPropagation();
     }
     return;
   }
 
-  // If in INSERT mode: ignore other keys unless Escape was pressed or universal shortcuts
-  if (currentMode.value === "INSERT") {
-    return;
-  }
-
-  // If in HINT mode: process letter inputs
   if (currentMode.value === "HINT") {
-    if (/^[a-zA-Z]$/.test(key)) {
-      if (event.preventDefault) event.preventDefault();
-      await processHintInput(key);
+    if (/^[a-zA-Z]$/.test(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+      processHintInput(e.key);
     }
     return;
   }
 
-  // NORMAL MODE SHORTCUTS & SEQUENCES
-  if (currentMode.value === "NORMAL") {
-    const prevBuf = keyBuffer.value;
-
-    // Sequence 'gg': Top of page
-    if (prevBuf === "g" && key === "g") {
-      clearKeyBuffer();
-      webviewComponent.value?.scrollToTop();
-      return;
-    }
-
-    // Sequence 'gt': Next tab
-    if (prevBuf === "g" && key === "t") {
-      clearKeyBuffer();
-      nextTab();
-      return;
-    }
-
-    // Sequence 'gT': Previous tab
-    if (prevBuf === "g" && key === "T") {
-      clearKeyBuffer();
-      prevTab();
-      return;
-    }
-
-    // Sequence 'gi': Focus first input
-    if (prevBuf === "g" && key === "i") {
-      clearKeyBuffer();
-      webviewComponent.value?.focusFirstInput();
-      setMode("INSERT");
-      showToast("-- INSERT --", 1200);
-      return;
-    }
-
-    // Sequence 'dd': Close tab
-    if (prevBuf === "d" && key === "d") {
-      clearKeyBuffer();
-      closeTab(activeTabId.value);
-      showToast("Closed tab (dd)");
-      return;
-    }
-
-    // Sequence 'yy': Yank current URL
-    if (prevBuf === "y" && key === "y") {
-      clearKeyBuffer();
-      await handleYankUrl();
-      return;
-    }
-
-    // Sequence 'zi' / 'zo' / 'zz': Zoom
-    if (prevBuf === "z") {
-      clearKeyBuffer();
-      if (key === "i") webviewComponent.value?.zoomIn();
-      else if (key === "o") webviewComponent.value?.zoomOut();
-      else if (key === "z") webviewComponent.value?.resetZoom();
-      return;
-    }
-
-    // Number prefix tab jumping (e.g. '2gt')
-    if (/^[1-9]$/.test(prevBuf) && key === "g") {
-      appendKeyBuffer("g");
-      return;
-    }
-    if (/^[1-9]g$/.test(prevBuf) && key === "t") {
-      const tabNum = parseInt(prevBuf[0], 10);
-      clearKeyBuffer();
-      const ok = jumpToTab(tabNum);
-      if (ok) {
-        showToast(`Jumped to tab ${tabNum}`);
-      } else {
-        showToast(`Tab ${tabNum} does not exist (${tabs.value.length} open)`);
-      }
-      return;
-    }
-
-    // Single keys
-    switch (key) {
-      // Scrolling
-      case "j":
-        webviewComponent.value?.scrollDown(120);
-        break;
-
-      case "k":
-        webviewComponent.value?.scrollUp(120);
-        break;
-
-      case "d":
-        // Half page down and allow 'dd' follow-up
-        webviewComponent.value?.scrollHalfDown();
-        appendKeyBuffer("d");
-        break;
-
-      case "u":
-        // Half page up
-        webviewComponent.value?.scrollHalfUp();
-        break;
-
-      case "U":
-        // Restore closed tab
-        restoreClosedTab();
-        showToast("Restored closed tab");
-        break;
-
-      case "G":
-        // Scroll to bottom
-        webviewComponent.value?.scrollToBottom();
-        break;
-
-      // Hints
-      case "f":
-        enterHintMode(false);
-        break;
-
-      case "F":
-        enterHintMode(true);
-        break;
-
-      // Omnibar & Tabs
-      case "o":
-        openOmnibarCurrent();
-        break;
-
-      case "O":
-        openOmnibarNewTab();
-        break;
-
-      case "t":
-        openOmnibarNewTab();
-        break;
-
-      case "x":
-        closeTab(activeTabId.value);
-        showToast("Closed tab");
-        break;
-
-      case "J":
-        nextTab();
-        break;
-
-      case "K":
-        prevTab();
-        break;
-
-      // History & Reload
-      case "H":
-        webviewComponent.value?.goBack();
-        break;
-
-      case "L":
-        webviewComponent.value?.goForward();
-        break;
-
-      case "r":
-        webviewComponent.value?.reload(false);
-        showToast("Reloading page");
-        break;
-
-      case "R":
-        webviewComponent.value?.reload(true);
-        showToast("Hard reloading (cache bypassed)");
-        break;
-
-      // Search & Commands
-      case "/":
-        setMode("FIND");
-        break;
-
-      case ":":
-        setMode("COMMAND");
-        break;
-
-      case "?":
-        setMode("HELP");
-        break;
-
-      // Buffers, Bookmarks & Downloads
-      case "b":
-        setMode("BUFFER");
-        break;
-
-      case "B":
-        setMode("BOOKMARKS");
-        break;
-
-      case "D":
-        setMode("DOWNLOADS");
-        break;
-
-      case "p":
-        handlePasteOpen(false);
-        break;
-
-      case "P":
-        handlePasteOpen(true);
-        break;
-
-      // Mode switch
-      case "i":
-        setMode("INSERT");
-        showToast("-- INSERT --", 1200);
-        break;
-
-      // Sequences starters
-      case "g":
-      case "y":
-      case "z":
-        appendKeyBuffer(key);
-        break;
-
-      default:
-        // Number prefix starter
-        if (/^[1-9]$/.test(key)) {
-          appendKeyBuffer(key);
-        }
-        break;
-    }
+  const res = keymaps.feedEvent("normal", e);
+  if (res && (res.status === "consumed" || res.status === "pending" || res.status === "count")) {
+    e.preventDefault();
+    e.stopPropagation();
   }
 };
+
+let unbindOpenNewTab = null;
+let unbindWebviewEscape = null;
+let unbindConfigChange = null;
+
+onMounted(async () => {
+  initDownloads();
+  registerToastCallback(showToast);
+
+  const cfg = await keymaps.loadConfig();
+  setThemes(cfg.colorschemes, cfg.colorscheme);
+  pushKeymaps();
+
+  // Restore the previous session before wiring tabs up.
+  const saved = await session.load();
+  if (options.value.restoreSession !== false && saved?.tabs?.length) {
+    initTabs(saved.tabs, saved.activeIndex);
+  }
+
+  window.addEventListener("keydown", handleGlobalKeydown, true);
+
+  if (window.electronAPI?.onOpenNewTab) {
+    unbindOpenNewTab = window.electronAPI.onOpenNewTab((url) => {
+      if (url) {
+        createTab(url, true);
+        showToast(`Opened tab: ${url}`);
+      }
+    });
+  }
+  if (window.electronAPI?.onWebviewEscape) {
+    unbindWebviewEscape = window.electronAPI.onWebviewEscape(() => handleEscape());
+  }
+  if (window.electronAPI?.onConfigChange) {
+    unbindConfigChange = window.electronAPI.onConfigChange((nextCfg) => {
+      keymaps.applyConfig(nextCfg);
+      applyThemeConfig(nextCfg);
+      pushKeymaps();
+    });
+  }
+
+  ensureFocus();
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown, true);
+  if (unbindOpenNewTab) unbindOpenNewTab();
+  if (unbindWebviewEscape) unbindWebviewEscape();
+  if (unbindConfigChange) unbindConfigChange();
+});
+
+// Persist the session whenever tabs or the active tab change.
+watch(
+  () => tabs.value.map((t) => `${t.id}:${t.url}`).join("|"),
+  () => session.save(tabs.value, activeTabIndex.value),
+);
+watch(activeTabId, () => session.save(tabs.value, activeTabIndex.value));
 </script>
 
 <style>

@@ -50,13 +50,19 @@ pnpm start
 ```
 keyor/
 ├── electron/
-│   ├── main.cjs               # Main process: window lifecycle, IPC handlers, app readiness
-│   ├── tab-views.cjs          # Native WebContentsView manager: tab lifecycle, bounds, and mode integration
+│   ├── main.cjs               # Main process: window lifecycle, IPC handlers, persistence, config watcher
+│   ├── tab-views.cjs          # Native WebContentsView manager: tab lifecycle, bounds, mode & keymap integration
 │   ├── downloads.cjs          # Download manager: active downloads, persistence, and file actions
-│   ├── themes.cjs             # Theme manager: ~/.keyor/theme.json initialization & watcher
+│   ├── config.cjs             # ~/.keyor/init.js: build/read/save, hot-reload watcher, default template
+│   ├── themes.cjs             # Builtin colorscheme palettes (BUILTIN_THEMES)
 │   ├── preload.cjs            # ContextBridge: safe desktop API exposure
 │   └── webview-preload.cjs    # Guest script injected into tabs: keyboard capture & hints
 ├── src/
+│   ├── config/
+│   │   ├── keymapEngine.js         # Key sequence trie: multi-key, modifiers, counts, timeoutlen
+│   │   └── defaultConfig.js        # Built-in options/keymaps + web-preview fallback
+│   ├── keymaps/
+│   │   └── actions.js              # Action registry, categoryFor(), createActionRunner(ctx)
 │   ├── components/
 │   │   ├── BrowserHeader.vue       # Frameless titlebar & numbered tab bar (:1, :2, etc.)
 │   │   ├── BrowserWebview.vue      # Viewport anchor, hint runner, and WebContentsView bridge
@@ -70,10 +76,13 @@ keyor/
 │   │   ├── HelpModal.vue           # Searchable keybindings cheatsheet (?)
 │   │   └── NewTabPage.vue          # Internal start dashboard (keyor://start)
 │   ├── composables/
-│   │   ├── useTabs.js              # Tab state machine & closed tab history stack (u)
-│   │   ├── useTheme.js             # Vim theme engine, CSS variable injector & watcher listener
+│   │   ├── useTabs.js              # Tab state machine & closed tab history stack (U)
+│   │   ├── useKeymaps.js           # Reactive config + KeymapEngine singleton (load/apply/feed)
+│   │   ├── useCommands.js          # Vim `:` command-line execution (AVAILABLE_COMMANDS)
+│   │   ├── useSession.js           # Tab session persistence & restore
+│   │   ├── useTheme.js             # Config-driven colorscheme engine, CSS variable injector
 │   │   ├── useDownloads.js         # Reactive downloads state, real-time events & formatters
-│   │   ├── useVimKeybindings.js    # Mode state, pending key sequences, toast alerts
+│   │   ├── useVimKeybindings.js    # Mode state, hint buffer, toast alerts
 │   │   ├── useBookmarks.js         # Bookmarks persistence
 │   │   └── useHistory.js           # Navigation history persistence
 │   ├── utils/
@@ -106,17 +115,45 @@ All modal states are coordinated by `useVimKeybindings.js` and dispatched throug
 | `HELP` | `?` | `Esc` / click | Interactive Vim cheatsheet |
 
 ### Essential Navigation Keybindings
-- **Scroll:** `j` (down), `k` (up), `d` (half-down), `u` (half-up), `gg` (top), `G` (bottom).
-- **Tabs:** `t` (new tab), `x` / `d` (close tab), `J` / `K` (next/prev tab), `u` / `U` (restore closed tab), `1`..`9` / `:1`..`:9` (direct jump to tab index).
+- **Scroll:** `j` (down), `k` (up), `d` (half-down), `u` (half-up), `Ctrl+d`/`Ctrl+u`/`Ctrl+f`/`Ctrl+b`, `gg` (top), `G` (bottom).
+- **Tabs:** `t`/`T` (new tab), `x`/`X` (close tab), `J`/`K` (next/prev), `U` (restore closed tab), `Y` (duplicate), `1gt`..`9gt` / `Alt+1`..`9` (jump to tab N).
 - **Hints:** `f` (open in active tab), `F` (open in new tab), `gi` (focus first input).
 - **Clipboard & Downloads:** `yy` (yank current URL), `p` (open clipboard in tab), `P` (open clipboard in new tab), `D` (open Downloads manager).
 - **History & Zoom:** `H` / `L` (back/forward), `r` / `R` (reload/hard-reload), `zi` / `zo` / `zz` (zoom in/out/reset).
 
+> **Important:** keybindings are **no longer hardcoded in `App.vue`**. They live in the config (`~/.keyor/init.js`, mirrored by `src/config/defaultConfig.js`) and are resolved by `KeymapEngine` + the action registry. To change a binding, edit the config, not the dispatcher.
+
 ---
 
-## 5. Theme System (`~/.keyor/theme.json`)
+## 5. Config System (`~/.keyor/init.js`)
 
-Keyor stores its colorscheme in the user's home directory under `~/.keyor/theme.json`.
+One Neovim-style JavaScript module configures **everything**: colorscheme, custom colorschemes, options, and keymaps. It hot-reloads on save (no restart), exactly like `init.lua`.
+
+```js
+module.exports = {
+  colorscheme: 'tokyonight',
+  colorschemes: { /* custom { name, author, type, colors } entries */ },
+  options: {
+    leader: '<Space>', timeoutlen: 500, scrollStep: 120,
+    hintChars: 'asdfjklghweruio', searchEngine: 'https://duckduckgo.com/?q=',
+    homePage: 'keyor://start', restoreSession: true,
+  },
+  keymaps: {
+    normal: { '<C-j>': 'scroll.down', '<leader>t': { action: 'theme.set', args: 'gruvbox' } },
+    insert: { '<C-e>': 'mode.normal' },
+  },
+};
+```
+
+- **Key notation:** multi-key sequences and modifiers — `"gg"`, `"gt"`, `"yy"`, `"<C-d>"`, `"<A-1>"`, `"<leader>b"`, `"<C-S-Tab>"`, `"<Space>"`.
+- **Mapping values:** a plain action id string, or `{ action, desc, args }`.
+- **Counts:** motion/tab actions accept a numeric prefix (`5j`, `3gt`, `2d`).
+- **Merging:** only keys you specify are overridden; the rest fall back to built-in defaults.
+
+### Data flow
+- `electron/config.cjs` builds/reads/writes the file, merges `BUILTIN_THEMES` into `colorschemes`, and watches `~/.keyor` (`fs.watch`) → emits `config-changed`.
+- `useKeymaps` loads config, feeds `KeymapEngine` (`src/config/keymapEngine.js`) and pushes the guest intercept key list to `tab-views.cjs` (`SET_KEYMAPS`) so only configured keys are hijacked inside pages.
+- `useTheme` applies `config.colorschemes[config.colorscheme].colors` to CSS variables.
 
 ### Pre-loaded Vim Themes
 - `tokyonight` (Tokyo Night — folke)
@@ -137,14 +174,15 @@ All components must use these variables instead of hardcoded hex values:
 - Text: `--text-main`, `--text-muted`, `--text-dim`
 - Accents: `--accent-vim`, `--accent-blue`, `--accent-cyan`, `--accent-amber`, `--accent-purple`, `--accent-rose`
 
-### Vim Commands for Themes
-- `:colorscheme <name>` or `:colo <name>`: Switch theme.
+### Vim Commands for Config & Themes
+- `:colorscheme <name>` or `:colo <name>`: Switch theme (persists to config).
 - `:colorscheme`: Print current theme and config location.
-- `:themes`: List all available themes.
-- `:themeedit`: Open `~/.keyor/theme.json` in system editor.
+- `:themes` / `:colorschemes`: List all available colorschemes.
+- `:config` / `:themeedit`: Open `~/.keyor/init.js` in the system editor.
+- `:source` / `:so`: Reload `~/.keyor/init.js` without restarting.
 
 ### Live Hot-Reloading
-`electron/themes.cjs` watches `~/.keyor` via `fs.watch`. When `theme.json` is modified in an external editor, Electron emits `theme-changed` and `useTheme.js` immediately updates CSS variables without restarting the application.
+`electron/config.cjs` watches `~/.keyor` via `fs.watch`. When `init.js` is modified in an external editor, Electron emits `config-changed`; `useKeymaps` re-applies the keymap engine and `useTheme` immediately updates CSS variables — no restart required.
 
 ---
 
@@ -152,10 +190,15 @@ All components must use these variables instead of hardcoded hex values:
 
 When modifying or extending Keyor, follow these strict guidelines:
 
-### 1. Electron `<webview>` Navigation (`ERR_ABORTED -3`)
-- **Do not trigger concurrent double-loads.** When transitioning from `keyor://start` to an external URL, Vue conditionally mounts `<webview :src="url">`, which automatically initiates navigation. Do not simultaneously call `wv.loadURL(url)`.
-- Always wrap `wv.loadURL(url)` with `.catch((err) => { if (err?.errno !== -3) ... })` to avoid unhandled promise rejections in Electron's `GUEST_VIEW_MANAGER_CALL`.
-- Handle `did-fail-load` on both the `<webview>` element and `web-contents-created` in `main.cjs` to suppress normal `-3` (`ERR_ABORTED`) noise from redirects.
+### 1. Tabs use native `WebContentsView` (NOT `<webview>`)
+- Browser tabs are `WebContentsView`s attached to `BrowserWindow.contentView` and managed by `electron/tab-views.cjs`. There is no `<webview>` custom element; do not add one back.
+- Guest keyboard capture happens in `electron/webview-preload.cjs`, and it is fed by `before-input-event` + `host-message` (`SET_KEYMAPS` / `SET_MODE`) — not by renderer-side key listeners.
+- Always wrap `webContents.loadURL(...)` with `.catch((err) => { if (err?.errno !== -3 && err?.code !== 'ERR_ABORTED') ... })` to suppress normal `-3` abort noise.
+- The internal `keyor://start` page is rendered by Vue, so its tab view stays hidden.
+
+### 1b. Only intercept configured keys (guest vs renderer)
+- The renderer sends the authoritative `{ normalKeys, insertKeys }` set (from `useKeymaps.interceptKeys`) to the main process, which forwards it to each guest via `SET_KEYMAPS`. Never hardcode a key list in the preload.
+- A single key press must be handled exactly once: the guest (via `webview-ipc-message`) or the renderer (`window` capture listener) — never both. Do not also emit a `VIM_KEY` for Escape from the preload; `before-input-event` already reports it.
 
 ### 2. Vite Asset Base
 - In `vite.config.js`, `base: './'` must always be set. Without relative paths, standalone Electron builds (`loadFile('dist/index.html')`) fail with 404 errors on root-relative `/assets/...`.
@@ -174,22 +217,24 @@ When modifying or extending Keyor, follow these strict guidelines:
 
 ## 7. How to Add New Features
 
-### Adding a New Vim Command
-1. Open `src/components/CommandBar.vue`:
+### Adding a New Action (backing a keybinding)
+1. Open `src/keymaps/actions.js`:
+   - Add metadata to `ACTION_META` (`'mygroup.thing': { desc: '...' }`) and map the prefix in `CATEGORY_BY_PREFIX` if it is a new category.
+   - Add the implementation to the `actions` object inside `createActionRunner(ctx)` (`'mygroup.thing': (payload) => { ... }`). Use only `ctx.*` — never reach into components directly.
+2. Wire any missing capability onto the `ctx` object in `App.vue`.
+3. Bind it: add the mapping to `electron/config.cjs` (`buildDefaultKeymaps`) and `src/config/defaultConfig.js` (keep both in sync). The HelpModal builds itself from these keymaps automatically.
+
+### Adding a New Keybinding (user-facing)
+- No code change required — edit `~/.keyor/init.js` and set `keymaps.normal` / `keymaps.insert` entries, e.g. `'<C-j>': 'scroll.down'`. Save to hot-reload.
+- To also ship it as a default, update `buildDefaultKeymaps()` in `electron/config.cjs` and `defaultConfig.js`.
+
+### Adding a New Vim `:` Command
+1. Open `src/composables/useCommands.js`:
    - Add the command object to `AVAILABLE_COMMANDS` (`{ name, args, desc }`).
-2. Open `src/App.vue`:
-   - Add a case inside `executeVimCommand(rawCommand)` to handle execution and display toast feedback.
+   - Add a `case` in `execute()` using only `ctx.*`.
+2. Open `src/components/CommandBar.vue` and add the matching entry to its local `AVAILABLE_COMMANDS` (autocomplete list).
 
-### Adding a New Keybinding Sequence
-1. Open `src/App.vue`:
-   - Inside `handleVimKey(key, event)` under `currentMode === "NORMAL"`:
-   - Handle single-key shortcuts in the `switch (key)` block.
-   - For multi-key sequences (e.g. `yy`, `gg`, `dd`), check `keyBuffer.value` before clearing with `clearKeyBuffer()`.
-2. Open `src/components/HelpModal.vue` and `src/components/NewTabPage.vue`:
-   - Add the new binding to the cheatsheet tables.
-
-### Adding a New Builtin Theme
+### Adding a New Builtin Colorscheme
 1. Open `electron/themes.cjs`:
-   - Add the palette definition to `BUILTIN_THEMES`.
-2. Open `src/composables/useTheme.js`:
-   - Add the fallback definition to `FALLBACK_THEMES`.
+   - Add the palette to `BUILTIN_THEMES`. It is merged into `config.colorschemes` automatically and appears in `:themes` and the HelpModal command list.
+   - `useTheme.js` needs no change (main supplies the palette; the web preview uses a small fallback).

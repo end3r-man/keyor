@@ -17,15 +17,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readClipboard: () => ipcRenderer.invoke('clipboard-read'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
-  getTheme: () => ipcRenderer.invoke('get-theme'),
-  saveTheme: (themeData) => ipcRenderer.invoke('save-theme', themeData),
-  getThemePath: () => ipcRenderer.invoke('get-theme-path'),
-  openThemeFile: () => ipcRenderer.invoke('open-theme-file'),
-  onThemeChange: (callback) => {
+  // Config (~/.keyor/init.js)
+  getConfig: () => ipcRenderer.invoke('get-config'),
+  saveConfig: (patch) => ipcRenderer.invoke('save-config', patch),
+  getConfigPath: () => ipcRenderer.invoke('get-config-path'),
+  openConfigFile: () => ipcRenderer.invoke('open-config-file'),
+  onConfigChange: (callback) => {
     const handler = (event, data) => callback(data);
-    ipcRenderer.on('theme-changed', handler);
-    return () => ipcRenderer.removeListener('theme-changed', handler);
+    ipcRenderer.on('config-changed', handler);
+    return () => ipcRenderer.removeListener('config-changed', handler);
   },
+  getSession: () => ipcRenderer.invoke('get-session'),
+  saveSession: (payload) => ipcRenderer.invoke('save-session', payload),
   onOpenNewTab: (callback) => {
     const handler = (event, url) => callback(url);
     ipcRenderer.on('open-new-tab', handler);
@@ -70,6 +73,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tabViewNavigate: (id, url) => ipcRenderer.invoke('tab-view-navigate', id, url),
   tabViewSetMode: (mode) => ipcRenderer.invoke('tab-view-set-mode', mode),
   tabViewSetBounds: (bounds) => ipcRenderer.invoke('tab-view-set-bounds', bounds),
+  tabViewGetViewport: () => ipcRenderer.invoke('tab-view-get-viewport'),
+  tabViewSetKeymaps: (payload) => ipcRenderer.invoke('tab-view-set-keymaps', payload),
   tabViewBlur: () => ipcRenderer.invoke('tab-view-blur'),
   tabViewFocusFirstInput: () => ipcRenderer.invoke('tab-view-focus-first-input'),
   tabViewScrollBy: (top, left, smooth) => ipcRenderer.invoke('tab-view-scroll-by', top, left, smooth),

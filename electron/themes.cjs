@@ -1,9 +1,10 @@
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
-
-const keyorDir = path.join(os.homedir(), '.keyor');
-const themeFile = path.join(keyorDir, 'theme.json');
+/**
+ * Built-in Vim colorschemes shipped with Keyor.
+ *
+ * Active theme selection and custom colorschemes live in `~/.keyor/init.js`
+ * (see electron/config.cjs). These builtins are merged under the user's
+ * `colorschemes` so they are always available and can be overridden.
+ */
 
 const BUILTIN_THEMES = {
   tokyonight: {
@@ -228,128 +229,4 @@ const BUILTIN_THEMES = {
   }
 };
 
-const DEFAULT_THEME_CONFIG = {
-  $schema: 'https://keyor.dev/schemas/theme.json',
-  description: 'Keyor Vim Theme Configuration. Edit colors, add custom themes, or switch active_theme.',
-  active_theme: 'tokyonight',
-  themes: BUILTIN_THEMES
-};
-
-/**
- * Ensure ~/.keyor directory and ~/.keyor/theme.json exist.
- */
-function ensureThemeConfig() {
-  try {
-    if (!fs.existsSync(keyorDir)) {
-      fs.mkdirSync(keyorDir, { recursive: true });
-    }
-
-    if (!fs.existsSync(themeFile)) {
-      fs.writeFileSync(themeFile, JSON.stringify(DEFAULT_THEME_CONFIG, null, 2), 'utf-8');
-      console.log(`Created default Vim theme config at ${themeFile}`);
-    }
-  } catch (err) {
-    console.error(`Error ensuring theme configuration at ${themeFile}:`, err);
-  }
-}
-
-/**
- * Load and merge theme configuration from ~/.keyor/theme.json
- */
-function loadThemeConfig() {
-  try {
-    ensureThemeConfig();
-    if (fs.existsSync(themeFile)) {
-      const content = fs.readFileSync(themeFile, 'utf-8');
-      const parsed = JSON.parse(content);
-      
-      // Merge with builtin themes so user themes complement builtins
-      const themes = {
-        ...BUILTIN_THEMES,
-        ...(parsed.themes || {})
-      };
-
-      return {
-        active_theme: parsed.active_theme || 'tokyonight',
-        themes,
-        themePath: themeFile
-      };
-    }
-  } catch (err) {
-    console.error(`Error reading ${themeFile}:`, err);
-  }
-
-  return {
-    active_theme: 'tokyonight',
-    themes: BUILTIN_THEMES,
-    themePath: themeFile
-  };
-}
-
-/**
- * Save updated theme configuration to ~/.keyor/theme.json
- */
-function saveThemeConfig(data) {
-  try {
-    ensureThemeConfig();
-    // Preserve existing file properties if possible
-    let existing = {};
-    if (fs.existsSync(themeFile)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(themeFile, 'utf-8'));
-      } catch (e) {
-        existing = {};
-      }
-    }
-
-    const merged = {
-      $schema: 'https://keyor.dev/schemas/theme.json',
-      description: 'Keyor Vim Theme Configuration. Edit colors, add custom themes, or switch active_theme.',
-      active_theme: data.active_theme || existing.active_theme || 'tokyonight',
-      themes: data.themes || existing.themes || BUILTIN_THEMES
-    };
-
-    fs.writeFileSync(themeFile, JSON.stringify(merged, null, 2), 'utf-8');
-    return true;
-  } catch (err) {
-    console.error(`Error writing ${themeFile}:`, err);
-    return false;
-  }
-}
-
-/**
- * Watch ~/.keyor/theme.json and notify on external changes (e.g. edited in Vim/Neovim)
- */
-function setupThemeWatcher(callback) {
-  ensureThemeConfig();
-
-  let debounceTimer = null;
-  try {
-    // Watching the directory handles atomic file saves performed by text editors
-    fs.watch(keyorDir, (eventType, filename) => {
-      if (filename === 'theme.json' || !filename) {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          try {
-            const config = loadThemeConfig();
-            callback(config);
-          } catch (e) {
-            console.error('Error reloading theme on watch event:', e);
-          }
-        }, 120);
-      }
-    });
-  } catch (err) {
-    console.error(`Failed to watch directory ${keyorDir}:`, err);
-  }
-}
-
-module.exports = {
-  keyorDir,
-  themeFile,
-  BUILTIN_THEMES,
-  ensureThemeConfig,
-  loadThemeConfig,
-  saveThemeConfig,
-  setupThemeWatcher
-};
+module.exports = { BUILTIN_THEMES };

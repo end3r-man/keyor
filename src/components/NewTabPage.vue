@@ -33,7 +33,7 @@
             @click.prevent="$emit('navigate', bm.url)"
           >
             <div class="dial-icon-wrap">
-              <span class="dial-icon">{{ bm.icon || '🌐' }}</span>
+              <span class="dial-icon"><DynamicIcon :name="bm.icon" fallback="Globe" :size="18" /></span>
               <span class="dial-num">{{ idx + 1 }}</span>
             </div>
             <div class="dial-info">
@@ -77,9 +77,9 @@
           <div class="cheat-category">
             <span class="cat-title">TABS & BUFFERS</span>
             <div class="cheat-row"><kbd>t</kbd><span>New tab</span></div>
-            <div class="cheat-row"><kbd>d</kbd> / <kbd>x</kbd><span>Close current tab</span></div>
+            <div class="cheat-row"><kbd>x</kbd> / <kbd>X</kbd><span>Close current tab</span></div>
             <div class="cheat-row"><kbd>J</kbd><kbd>K</kbd><span>Next / previous tab</span></div>
-            <div class="cheat-row"><kbd>u</kbd><span>Restore closed tab</span></div>
+            <div class="cheat-row"><kbd>U</kbd><span>Restore closed tab</span></div>
           </div>
 
           <div class="cheat-category">
@@ -130,6 +130,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import DynamicIcon from './DynamicIcon.vue';
 
 const props = defineProps({
   bookmarks: {

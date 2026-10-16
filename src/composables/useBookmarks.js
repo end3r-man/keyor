@@ -4,12 +4,12 @@ const bookmarks = ref([]);
 const isLoaded = ref(false);
 
 const DEFAULT_BOOKMARKS = [
-  { id: '1', title: 'DuckDuckGo Search', url: 'https://duckduckgo.com', icon: '🦆', date: Date.now() },
-  { id: '2', title: 'GitHub', url: 'https://github.com', icon: '🐙', date: Date.now() },
-  { id: '3', title: 'Hacker News', url: 'https://news.ycombinator.com', icon: '⚡', date: Date.now() },
-  { id: '4', title: 'Vue.js Framework', url: 'https://vuejs.org', icon: '🟢', date: Date.now() },
-  { id: '5', title: 'MDN Web Docs', url: 'https://developer.mozilla.org', icon: '📚', date: Date.now() },
-  { id: '6', title: 'Vim Quick Reference', url: 'https://vim.rtorr.com', icon: '⌨️', date: Date.now() }
+  { id: '1', title: 'DuckDuckGo Search', url: 'https://duckduckgo.com', icon: 'Search', date: Date.now() },
+  { id: '2', title: 'GitHub', url: 'https://github.com', icon: 'Code', date: Date.now() },
+  { id: '3', title: 'Hacker News', url: 'https://news.ycombinator.com', icon: 'Zap', date: Date.now() },
+  { id: '4', title: 'Vue.js Framework', url: 'https://vuejs.org', icon: 'Leaf', date: Date.now() },
+  { id: '5', title: 'MDN Web Docs', url: 'https://developer.mozilla.org', icon: 'BookOpen', date: Date.now() },
+  { id: '6', title: 'Vim Quick Reference', url: 'https://vim.rtorr.com', icon: 'Keyboard', date: Date.now() }
 ];
 
 export function useBookmarks() {
@@ -56,7 +56,7 @@ export function useBookmarks() {
       id: Date.now().toString(),
       title: title || url,
       url,
-      icon: '🔖',
+      icon: 'Bookmark',
       date: Date.now()
     };
     bookmarks.value.unshift(newBm);
